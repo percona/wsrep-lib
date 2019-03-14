@@ -92,7 +92,8 @@ namespace wsrep
         virtual int append_fragment_and_commit(
             const wsrep::ws_handle& ws_handle,
             const wsrep::ws_meta& ws_meta,
-            const wsrep::const_buffer& data) = 0;
+            const wsrep::const_buffer& data,
+            const std::string& xid) = 0;
 
         /**
          * Remove fragments belonging to streaming transaction.
@@ -101,11 +102,10 @@ namespace wsrep
          * whole transaction. The call will be done from streaming
          * transaction context.
          *
-         * @param ws_meta Write set meta data for commit fragment.
-         *
          * @return Zero on success, non-zero on failure.
          */
-        virtual int remove_fragments(const wsrep::ws_meta& ws_meta) = 0;
+        virtual int remove_fragments(const wsrep::id& server_id,
+                                     const wsrep::transaction_id& trx_id) = 0;
 
         /**
          * Commit a transaction.

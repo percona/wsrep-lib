@@ -250,12 +250,20 @@ namespace wsrep
 
         void stop_streaming_applier(
             const wsrep::id&, const wsrep::transaction_id&);
+
         /**
-         * Return reference to streaming applier.
+         * Find a streaming applier matching server and transaction ids
          */
         wsrep::high_priority_service* find_streaming_applier(
             const wsrep::id&,
             const wsrep::transaction_id&) const;
+
+        /**
+         * Find a streaming applier matching xid
+         */
+        wsrep::high_priority_service* find_streaming_applier(
+            const std::string& xid) const;
+
         /**
          * Load WSRep provider.
          *
@@ -668,6 +676,7 @@ namespace wsrep
         streaming_clients_map streaming_clients_;
         typedef std::map<std::pair<wsrep::id, wsrep::transaction_id>,
                          wsrep::high_priority_service*> streaming_appliers_map;
+
         class server_id_cmp
         {
         public:

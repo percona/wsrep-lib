@@ -117,7 +117,7 @@ namespace wsrep
          */
         bool is_empty() const
         {
-            return sr_keys_.empty();
+            return (key_count_ == 0);
         }
 
         bool is_xa() const
@@ -128,6 +128,15 @@ namespace wsrep
         bool is_xa_prepare() const
         {
             return client_service_.is_xa_prepare();
+        }
+
+        int restore_to_prepared_state();
+
+        int commit_or_rollback_by_xid(const std::string& xid, bool commit);
+
+        const std::string xid() const
+        {
+            return client_service_.xid();
         }
 
         bool pa_unsafe() const { return pa_unsafe_; }
@@ -244,6 +253,7 @@ namespace wsrep
         bool certified_;
         size_t fragments_certified_for_statement_;
         wsrep::streaming_context streaming_context_;
+        int key_count_;
         wsrep::sr_key_set sr_keys_;
     };
 

@@ -75,13 +75,18 @@ static int apply_fragment(wsrep::high_priority_service& high_priority_service,
         streaming_applier.after_apply();
     }
     high_priority_service.debug_crash("crash_apply_cb_before_append_frag");
-    ret = ret || high_priority_service.append_fragment_and_commit(
-        ws_handle, ws_meta, data);
+    if (!ret)
+    {
+        const std::string xid(streaming_applier.transaction().xid());
+        ret = high_priority_service.append_fragment_and_commit(ws_handle,
+                                                               ws_meta,
+                                                               data,
+                                                               xid);
+    }
     high_priority_service.debug_crash("crash_apply_cb_after_append_frag");
     high_priority_service.after_apply();
     return ret;
 }
-
 
 static int commit_fragment(wsrep::server_state& server_state,
                            wsrep::high_priority_service& high_priority_service,
@@ -106,7 +111,8 @@ static int commit_fragment(wsrep::server_state& server_state,
           streaming_applier->debug_crash(
             "crash_apply_cb_before_fragment_removal");
 
-          ret = ret || streaming_applier->remove_fragments(ws_meta);
+          ret = ret || streaming_applier->remove_fragments(ws_meta.server_id(),
+                                                           ws_meta.transaction_id());
 
           streaming_applier->debug_crash(
             "crash_apply_cb_after_fragment_removal");
@@ -155,6 +161,8 @@ static int rollback_fragment(wsrep::server_state& server_state,
         streaming_applier->rollback(wsrep::ws_handle(), wsrep::ws_meta());
         streaming_applier->after_apply();
     }
+
+    const wsrep::id server_id(streaming_applier->transaction().server_id());
     server_state.stop_streaming_applier(
         ws_meta.server_id(), ws_meta.transaction_id());
     server_state.server_service().release_high_priority_service(
@@ -162,7 +170,8 @@ static int rollback_fragment(wsrep::server_state& server_state,
 
     if (adopt_error == 0)
     {
-        high_priority_service.remove_fragments(ws_meta);
+        high_priority_service.remove_fragments(server_id,
+                                               ws_meta.transaction_id());
         high_priority_service.commit(ws_handle, ws_meta);
     }
     high_priority_service.after_apply();
@@ -1134,6 +1143,21 @@ wsrep::high_priority_service* wsrep::server_state::find_streaming_applier(
     return (i == streaming_appliers_.end() ? 0 : i->second);
 }
 
+wsrep::high_priority_service* wsrep::server_state::find_streaming_applier(
+  const std::string& xid) const
+{
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    for (auto const& i : streaming_appliers_)
+    {
+        wsrep::high_priority_service* sa(i.second);
+        if (sa->transaction().xid() == xid)
+        {
+            return sa;
+        }
+    }
+    return nullptr;
+}
+
 //////////////////////////////////////////////////////////////////////////////
 //                              Private                                     //
 //////////////////////////////////////////////////////////////////////////////
@@ -1308,13 +1332,19 @@ void wsrep::server_state::close_orphaned_sr_transactions(
     streaming_appliers_map::iterator i(streaming_appliers_.begin());
     while (i != streaming_appliers_.end())
     {
-        // rollback SR on equal consecutive primary views or if its
-        // originator is not in the current view
-        if (equal_consecutive_views ||
-            (std::find_if(current_view_.members().begin(),
-                          current_view_.members().end(),
-                          server_id_cmp(i->first.first)) ==
-             current_view_.members().end()))
+        wsrep::high_priority_service* streaming_applier(i->second);
+
+        // Rollback SR on equal consecutive primary views or if its
+        // originator is not in the current view.
+        // Transactions in prepared state must be committed or
+        // rolled back explicitly, those are never rolled back here.
+        if ((streaming_applier->transaction().state() !=
+             wsrep::transaction::s_prepared) &&
+            (equal_consecutive_views ||
+             (std::find_if(current_view_.members().begin(),
+                           current_view_.members().end(),
+                           server_id_cmp(i->first.first)) ==
+              current_view_.members().end())))
         {
             WSREP_LOG_DEBUG(wsrep::log::debug_log_level(),
                             wsrep::log::debug_level_server_state,
@@ -1323,7 +1353,6 @@ void wsrep::server_state::close_orphaned_sr_transactions(
                             << ", " << i->first.second);
             wsrep::id server_id(i->first.first);
             wsrep::transaction_id transaction_id(i->first.second);
-            wsrep::high_priority_service* streaming_applier(i->second);
             int adopt_error;
             if ((adopt_error = high_priority_service.adopt_transaction(
                      streaming_applier->transaction())))
@@ -1350,7 +1379,7 @@ void wsrep::server_state::close_orphaned_sr_transactions(
             lock.unlock();
             if (adopt_error == 0)
             {
-                high_priority_service.remove_fragments(ws_meta);
+                high_priority_service.remove_fragments(server_id, transaction_id);
                 high_priority_service.commit(wsrep::ws_handle(transaction_id, 0),
                                              ws_meta);
             }

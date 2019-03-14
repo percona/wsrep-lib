@@ -39,10 +39,12 @@ namespace db
                             const wsrep::const_buffer&) override;
         int append_fragment_and_commit(
             const wsrep::ws_handle&,
-            const wsrep::ws_meta&, const wsrep::const_buffer&)
-            override
+            const wsrep::ws_meta&,
+            const wsrep::const_buffer&,
+            const std::string&) override
         { return 0; }
-        int remove_fragments(const wsrep::ws_meta&) override
+        int remove_fragments(const wsrep::id&,
+                             const wsrep::transaction_id&) override
         { return 0; }
         int commit(const wsrep::ws_handle&, const wsrep::ws_meta&) override;
         int rollback(const wsrep::ws_handle&, const wsrep::ws_meta&) override;

@@ -106,6 +106,7 @@ wsrep::transaction::transaction(
     , certified_(false)
     , fragments_certified_for_statement_()
     , streaming_context_()
+    , key_count_()
     , sr_keys_()
 { }
 
@@ -222,7 +223,11 @@ int wsrep::transaction::append_key(const wsrep::key& key)
     try
     {
         debug_log_key_append(key);
-        sr_keys_.insert(key);
+        key_count_++;
+        if (streaming_context_.fragment_size())
+        {
+            sr_keys_.insert(key);
+        }
         return provider().append_key(ws_handle_, key);
     }
     catch (...)
@@ -411,7 +416,8 @@ int wsrep::transaction::before_commit()
             assert((ret == 0 && state() == s_committing) ||
                    (state() == s_must_abort ||
                     state() == s_must_replay ||
-                    state() == s_cert_failed));
+                    state() == s_cert_failed ||
+                    state() == s_prepared));
         }
         else if (state() == s_executing)
         {
@@ -1016,6 +1022,72 @@ bool wsrep::transaction::total_order_bf_abort(
     return ret;
 }
 
+int wsrep::transaction::restore_to_prepared_state()
+{
+    wsrep::unique_lock<wsrep::mutex> lock(client_state_.mutex_);
+    assert(active());
+    assert(is_empty());
+    assert(state() == s_executing);
+    flags(flags() & ~wsrep::provider::flag::start_transaction);
+    state(lock, s_certifying);
+    state(lock, s_prepared);
+    return 0;
+}
+
+int wsrep::transaction::commit_or_rollback_by_xid(const std::string& xid,
+                                                  bool commit)
+{
+    wsrep::unique_lock<wsrep::mutex> lock(client_state_.mutex_);
+    wsrep::server_state& server_state(client_state_.server_state());
+    wsrep::high_priority_service* sa(server_state.find_streaming_applier(xid));
+
+    if (!sa)
+    {
+        assert(sa);
+        client_state_.override_error(wsrep::e_error_during_commit);
+        return 1;
+    }
+
+    int flags(commit ?
+              wsrep::provider::flag::commit :
+              wsrep::provider::flag::rollback);
+    flags = flags | wsrep::provider::flag::pa_unsafe;
+    wsrep::stid stid(sa->transaction().server_id(),
+                     sa->transaction().id(),
+                     client_state_.id());
+    wsrep::ws_meta meta(stid);
+
+    const enum wsrep::provider::status cert_ret(
+        provider().certify(client_state_.id(),
+                           ws_handle_,
+                           flags,
+                           meta));
+
+    if (cert_ret == wsrep::provider::success)
+    {
+        if (commit)
+        {
+            state(lock, s_certifying);
+            state(lock, s_committing);
+            state(lock, s_committed);
+        }
+        else
+        {
+            state(lock, s_aborting);
+            state(lock, s_aborted);
+        }
+        return 0;
+    }
+    else
+    {
+        client_state_.override_error(wsrep::e_error_during_commit);
+        wsrep::log_error() << "Failed to commit_or_rollback_by_xid,"
+                           << " xid: " << xid
+                           << " error: " << cert_ret;
+        return 1;
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //                                 Private                                    //
 ////////////////////////////////////////////////////////////////////////////////
@@ -1247,7 +1319,8 @@ int wsrep::transaction::certify_fragment(
                 server_id,
                 id(),
                 flags(),
-                wsrep::const_buffer(data.data(), data.size())))
+                wsrep::const_buffer(data.data(), data.size()),
+                xid()))
         {
             ret = 1;
             error = wsrep::e_append_fragment_error;
@@ -1517,7 +1590,14 @@ int wsrep::transaction::certify_commit(
         {
             client_state_.override_error(wsrep::e_error_during_commit,
                                          cert_ret);
-            state(lock, s_must_abort);
+            if (is_xa())
+            {
+                state(lock, s_prepared);
+            }
+            else
+            {
+                state(lock, s_must_abort);
+            }
         }
         break;
     case wsrep::provider::error_provider_failed:
@@ -1645,6 +1725,7 @@ void wsrep::transaction::cleanup()
     certified_ = false;
     pa_unsafe_ = false;
     implicit_deps_ = false;
+    key_count_ = 0;
     sr_keys_.clear();
     streaming_context_.cleanup();
     client_service_.cleanup_transaction();
