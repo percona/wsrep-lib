@@ -21,6 +21,7 @@
 #define WSREP_WSREP_PROVIDER_V26_HPP
 
 #include "wsrep/provider.hpp"
+#include <wsrep_api.h>
 
 struct wsrep_st;
 
@@ -87,6 +88,9 @@ namespace wsrep
         std::string version() const;
         std::string vendor() const;
         void* native() const;
+
+        void fetch_pfs_info(wsrep_node_info_t *nodes, uint32_t size);
+
     private:
         wsrep_provider_v26(const wsrep_provider_v26&);
         wsrep_provider_v26& operator=(const wsrep_provider_v26);

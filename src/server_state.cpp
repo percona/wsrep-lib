@@ -31,7 +31,6 @@
 #include <sstream>
 #include <algorithm>
 
-
 //////////////////////////////////////////////////////////////////////////////
 //                               Helpers                                    //
 //////////////////////////////////////////////////////////////////////////////
@@ -171,6 +170,9 @@ static int apply_write_set(wsrep::server_state& server_state,
     {
         if (wsrep::starts_transaction(ws_meta.flags()))
         {
+            /* If the transaction fails at certification stage same needs
+            to be rolled back with proper monitor enter/exit to maintain
+            seqno consistency. This is done through log_dummy_write_set. */
             // No transaction existed before, log a dummy write set
             ret = high_priority_service.log_dummy_write_set(
                 ws_handle, ws_meta);
@@ -392,6 +394,7 @@ int wsrep::server_state::disconnect()
         wsrep::unique_lock<wsrep::mutex> lock(mutex_);
         state(lock, s_disconnecting);
         interrupt_state_waiters(lock);
+        init_initialized_ = false;
     }
     return provider().disconnect();
 }
@@ -549,9 +552,9 @@ void wsrep::server_state::sst_sent(const wsrep::gtid& gtid, int error)
 }
 
 void wsrep::server_state::sst_received(wsrep::client_service& cs,
-                                       int const error)
+                                       int const error, bool* awaiting_callback)
 {
-    wsrep::log_info() << "SST received";
+    wsrep::log_info() << "Processing SST received";
     wsrep::gtid gtid(wsrep::gtid::undefined());
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     assert(state_ == s_joiner || state_ == s_initialized);
@@ -569,7 +572,13 @@ void wsrep::server_state::sst_received(wsrep::client_service& cs,
                 lock.unlock();
                 server_service_.debug_sync("on_view_wait_initialized");
                 lock.lock();
-                wait_until_state(lock, s_initialized);
+                try {
+                  wait_until_state(lock, s_initialized);
+                } catch (const wsrep::runtime_error &e) {
+                  lock.unlock();
+                  wsrep::log_error() << "SST failed/interrupted";
+                  return;
+                }
                 assert(init_initialized_);
             }
         }
@@ -631,6 +640,13 @@ void wsrep::server_state::sst_received(wsrep::client_service& cs,
         lock.lock();
         recover_streaming_appliers_if_not_recovered(lock, cs);
         lock.unlock();
+    }
+
+    if (awaiting_callback) {
+      /* Mark that callback has been delivered to galera.
+         With error case above, it is possible that the it will not be delivered
+         to galera so the special check is needed. */
+      *awaiting_callback = false;
     }
 
     if (provider().sst_received(gtid, error))

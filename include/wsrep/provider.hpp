@@ -26,6 +26,8 @@
 #include "client_id.hpp"
 #include "transaction_id.hpp"
 
+#include "wsrep_api.h"
+
 #include <cassert>
 #include <cstring>
 
@@ -372,6 +374,11 @@ namespace wsrep
          * Return pointer to native provider handle.
          */
         virtual void* native() const = 0;
+
+        /**
+         * Fetch cluster node information to populate PXC cluster view table.
+         */
+        virtual void fetch_pfs_info(wsrep_node_info_t *nodes, uint32_t size) = 0;
 
         /**
          * Create a new provider.

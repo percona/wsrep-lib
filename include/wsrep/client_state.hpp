@@ -661,6 +661,14 @@ namespace wsrep
         int sync_wait(int timeout);
 
         /**
+         * Reset sync_wait_gtid on query retry.
+         */
+        void reset_sync_wait_gtid()
+        {
+            sync_wait_gtid_ = wsrep::gtid::undefined();
+        }
+
+        /**
          * Return the current sync wait GTID.
          *
          * Sync wait GTID is updated on each sync_wait() call and

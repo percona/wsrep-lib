@@ -482,8 +482,11 @@ namespace wsrep
          *
          * @param client_service
          * @param error code of the SST operation
+         * @param awaiting_callback is cleared if sst receieved is signal
+         *                          to galera module
          */
-        void sst_received(wsrep::client_service& cs, int error);
+        void sst_received(wsrep::client_service &cs, int error,
+                          bool *awaiting_callback = NULL);
 
         /**
          * This method must be called after the server initialization

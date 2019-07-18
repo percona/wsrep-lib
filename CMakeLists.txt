@@ -9,7 +9,7 @@ include(CheckIncludeFile)
 # Options
 
 # Compile unit tests
-option(WSREP_LIB_WITH_UNIT_TESTS "Compile unit tests" ON)
+option(WSREP_LIB_WITH_UNIT_TESTS "Compile unit tests" OFF)
 if (WSREP_LIB_WITH_UNIT_TESTS)
   # Run tests automatically by default if compiled
   option(WSREP_LIB_WITH_AUTO_TEST "Run unit tests automatically after build" OFF)
