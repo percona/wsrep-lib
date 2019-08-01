@@ -394,7 +394,6 @@ int wsrep::server_state::disconnect()
         wsrep::unique_lock<wsrep::mutex> lock(mutex_);
         state(lock, s_disconnecting);
         interrupt_state_waiters(lock);
-        init_initialized_ = false;
     }
     return provider().disconnect();
 }

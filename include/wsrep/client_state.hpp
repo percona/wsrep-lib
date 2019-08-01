@@ -505,6 +505,18 @@ namespace wsrep
         }
 
         /**
+         * Deattach the replaying transaction on failure.
+         *
+         * @param transaction Transaction which is to be replied in this
+         *                    client state
+         */
+        void deattach_after_replay()
+        {
+            // assert(mode_ == m_high_priority);
+            transaction_.deattach_after_replay();
+        }
+
+        /**
          * Copy state from another transaction context after replay.
          *
          * @param transaction Transaction which was used for replaying.

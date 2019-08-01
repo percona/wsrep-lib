@@ -505,6 +505,19 @@ namespace wsrep
         }
 
         /**
+         * Return true if the server has been initialized.
+         */
+        bool is_initialized_unprotected() const
+        {
+            /* this unprotected version is meant to be used only to check
+            server initialization state to decide flush of error log messages.
+            If flow hits error before server is initialized then such error
+            messages are flushed immediately. */
+            // wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+            return init_initialized_;
+        }
+
+        /**
          * This method will be called by the provider when
          * a remote write set is being applied. It is the responsibility
          * of the caller to set up transaction context and data properly.

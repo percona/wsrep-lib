@@ -171,6 +171,8 @@ namespace wsrep
 
         void clone_for_replay(const wsrep::transaction& other);
 
+        void deattach_after_replay();
+
         void after_replay(const wsrep::transaction& other);
 
         bool bf_aborted() const
