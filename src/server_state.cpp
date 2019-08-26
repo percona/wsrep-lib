@@ -1064,6 +1064,7 @@ void wsrep::server_state::convert_streaming_client_to_applier(
                                  << client_state->transaction().id();
             assert(0);
         }
+        client_state->set_streaming_transaction_id_for_retry();
     }
 }
 

@@ -1249,6 +1249,19 @@ int wsrep::transaction::certify_fragment(
                 // of error codes defined in wsrep-API. In order to make
                 // sure that the transaction will be cleaned on other servers,
                 // we take a risk of sending one rollback fragment for nothing.
+
+                // Check the detailed comment above. As per the flow described
+                // fragment certification may pass but the originating node may
+                // still end up getting error_certification_failed.
+                // Since the certification has passed the said fragment is
+                // replicated on other node of the cluster where it will
+                // consistently fail with cert error resulting in rollback
+                // fragment write-set.
+                // Rollback call below will undo append-fragment action executed
+                // above so the replicated rollback fragment write-set
+                // originating from other cluster nodes will be NO-OP operation.
+                // This is reason when the replicated rollback fragment
+                // write-set is recieved it emit Removing 0 fragments.
                 storage_service.rollback(wsrep::ws_handle(),
                                          wsrep::ws_meta());
                 streaming_context_.certified(data.size());
