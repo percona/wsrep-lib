@@ -681,41 +681,6 @@ namespace wsrep
         }
 
         /**
-         re* Wait for aborted SR state to clear before re-scheduling next retry
-         */
-        void wait_for_SR_cleanup() {
-          if (streaming_trx_id_for_retry_ ==
-              wsrep::transaction_id::undefined()) {
-#if 0
-            wsrep::log_debug()
-                << "Transaction not registered for rollback fragment"
-                << " Server ID: " << server_state_.id()
-                << " Trx ID: " << streaming_trx_id_for_retry_;
-#endif
-            return;
-          }
-
-          while (true) {
-            wsrep::high_priority_service *sa(
-                server_state_.find_streaming_applier(
-                    server_state_.id(), streaming_trx_id_for_retry_));
-            if (sa == 0) {
-              wsrep::log_debug() << "No pending aborted SR transaction entry"
-                                 << " Server ID: " << server_state_.id()
-                                 << " Trx ID: " << streaming_trx_id_for_retry_;
-              streaming_trx_id_for_retry_ = wsrep::transaction_id::undefined();
-              break;
-            }
-
-            wsrep::log_debug() << "Aborted SR transaction pending purge"
-                               << " Server ID: " << server_state_.id()
-                               << " Trx ID: " << streaming_trx_id_for_retry_;
-            usleep(1000);
-          }
-          return;
-        }
-
-        /**
          * Return the current sync wait GTID.
          *
          * Sync wait GTID is updated on each sync_wait() call and
@@ -787,10 +752,6 @@ namespace wsrep
             return current_error_status_;
         }
 
-        void set_streaming_transaction_id_for_retry()
-        {
-            streaming_trx_id_for_retry_ = transaction_.id();
-        }
     protected:
         /**
          * Client context constuctor. This is protected so that it
@@ -822,7 +783,6 @@ namespace wsrep
             , debug_log_level_(0)
             , current_error_(wsrep::e_success)
             , current_error_status_(wsrep::provider::success)
-            , streaming_trx_id_for_retry_(wsrep::transaction_id::undefined())
         { }
 
     private:
@@ -866,7 +826,6 @@ namespace wsrep
         int debug_log_level_;
         enum wsrep::client_error current_error_;
         enum wsrep::provider::status current_error_status_;
-        wsrep::transaction_id streaming_trx_id_for_retry_;
 
         /**
          * Assigns external rollbacker thread for the client
