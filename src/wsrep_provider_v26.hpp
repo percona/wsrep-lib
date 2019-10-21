@@ -27,12 +27,14 @@ struct wsrep_st;
 
 namespace wsrep
 {
+    class thread_service;
     class wsrep_provider_v26 : public wsrep::provider
     {
     public:
 
         wsrep_provider_v26(wsrep::server_state&, const std::string&,
-                           const std::string&);
+                           const std::string&,
+                           const wsrep::provider::services& services);
         ~wsrep_provider_v26();
         enum wsrep::provider::status
         connect(const std::string&, const std::string&, const std::string&,
@@ -47,6 +49,8 @@ namespace wsrep
 
         enum wsrep::provider::status run_applier(wsrep::high_priority_service*);
         int start_transaction(wsrep::ws_handle&) { return 0; }
+        enum wsrep::provider::status
+        assign_read_view(wsrep::ws_handle&, const wsrep::gtid*);
         int append_key(wsrep::ws_handle&, const wsrep::key&);
         enum wsrep::provider::status
         append_data(wsrep::ws_handle&, const wsrep::const_buffer&);
@@ -63,7 +67,8 @@ namespace wsrep
         commit_order_enter(const wsrep::ws_handle&,
                            const wsrep::ws_meta&);
         int commit_order_leave(const wsrep::ws_handle&,
-                               const wsrep::ws_meta&);
+                               const wsrep::ws_meta&,
+                               const wsrep::mutable_buffer&);
         int release(wsrep::ws_handle&);
         enum wsrep::provider::status replay(const wsrep::ws_handle&,
                                             wsrep::high_priority_service*);
@@ -72,7 +77,8 @@ namespace wsrep
                                                const wsrep::const_buffer&,
                                                wsrep::ws_meta&,
                                                int);
-        enum wsrep::provider::status leave_toi(wsrep::client_id);
+        enum wsrep::provider::status leave_toi(wsrep::client_id,
+                                               const wsrep::mutable_buffer&);
         std::pair<wsrep::gtid, enum wsrep::provider::status>
         causal_read(int) const;
         enum wsrep::provider::status wait_for_gtid(const wsrep::gtid&, int) const;

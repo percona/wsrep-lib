@@ -3,7 +3,28 @@
 #
 
 cmake_minimum_required (VERSION 2.8)
-project (wsrep-lib)
+
+# Parse version from version header file and store it into
+# WSREP_LIB_VERSION.
+file (READ "include/wsrep/version.hpp" ver)
+string(REGEX MATCH "WSREP_LIB_VERSION_MAJOR ([0-9]*)" _ ${ver})
+set(ver_major ${CMAKE_MATCH_1})
+file (READ "include/wsrep/version.hpp" ver)
+string(REGEX MATCH "WSREP_LIB_VERSION_MINOR ([0-9]*)" _ ${ver})
+set(ver_minor ${CMAKE_MATCH_1})
+file (READ "include/wsrep/version.hpp" ver)
+string(REGEX MATCH "WSREP_LIB_VERSION_PATCH ([0-9]*)" _ ${ver})
+set(ver_patch ${CMAKE_MATCH_1})
+set(WSREP_LIB_VERSION "${ver_major}.${ver_minor}.${ver_patch}")
+message(STATUS "Wsrep-lib version: ${WSREP_LIB_VERSION}")
+
+if (POLICY CMP0048)
+  cmake_policy(SET CMP0048 NEW)
+  project(wsrep-lib VERSION ${WSREP_LIB_VERSION})
+else()
+  project(wsrep-lib)
+endif()
+
 include(CheckIncludeFile)
 
 # Options
@@ -46,19 +67,22 @@ if (NOT CMAKE_CXX_STANDARD OR CMAKE_CXX_STANDARD LESS 11)
   endif()
 endif()
 
+# C flags
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wconversion")
 # CXX flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Woverloaded-virtual -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Woverloaded-virtual -Wconversion -g")
 
 if (WSREP_LIB_STRICT_BUILD_FLAGS)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Weffc++")
 endif()
 if (WSREP_LIB_MAINTAINER_MODE)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
 endif()
 
 # Set up include directories
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/include")
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/wsrep-API/v26")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/wsrep-API")
 
 if (WSREP_LIB_WITH_UNIT_TESTS)
   find_package(Boost 1.54.0 REQUIRED

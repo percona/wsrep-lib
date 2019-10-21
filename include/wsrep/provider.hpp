@@ -25,6 +25,7 @@
 #include "buffer.hpp"
 #include "client_id.hpp"
 #include "transaction_id.hpp"
+#include "compiler.hpp"
 
 #include "wsrep_api.h"
 
@@ -35,10 +36,17 @@
 #include <vector>
 #include <ostream>
 
+/**
+ * Empty provider magic. If none provider is passed to make_provider(),
+ * a dummy provider is loaded.
+ */
+#define WSREP_LIB_PROVIDER_NONE "none"
+
 namespace wsrep
 {
     class server_state;
     class high_priority_service;
+    class thread_service;
     class stid
     {
     public:
@@ -58,6 +66,14 @@ namespace wsrep
         wsrep::transaction_id transaction_id() const
         { return transaction_id_; }
         wsrep::client_id client_id() const { return client_id_; }
+        bool operator==(const stid& other) const
+        {
+            return (
+                server_id_ == other.server_id_ &&
+                transaction_id_ == other.transaction_id_ &&
+                client_id_ == other.client_id_
+            );
+        }
     private:
         wsrep::id server_id_;
         wsrep::transaction_id transaction_id_;
@@ -86,6 +102,13 @@ namespace wsrep
 
         void* opaque() const { return opaque_; }
 
+        bool operator==(const ws_handle& other) const
+        {
+            return (
+                transaction_id_ == other.transaction_id_ &&
+                opaque_ == other.opaque_
+            );
+        }
     private:
         wsrep::transaction_id transaction_id_;
         void* opaque_;
@@ -109,7 +132,12 @@ namespace wsrep
             , depends_on_(depends_on)
             , flags_(flags)
         { }
-
+        ws_meta(const wsrep::stid& stid)
+            : gtid_()
+            , stid_(stid)
+            , depends_on_()
+            , flags_()
+        { }
         const wsrep::gtid& gtid() const { return gtid_; }
         const wsrep::id& group_id() const
         {
@@ -136,15 +164,29 @@ namespace wsrep
             return stid_.transaction_id();
         }
 
+        bool ordered() const { return !gtid_.is_undefined(); }
+
         wsrep::seqno depends_on() const { return depends_on_; }
 
         int flags() const { return flags_; }
+
+        bool operator==(const ws_meta& other) const
+        {
+            return (
+                gtid_ == other.gtid_ &&
+                stid_ == other.stid_ &&
+                depends_on_ == other.depends_on_ &&
+                flags_ == other.flags_
+            );
+        }
     private:
         wsrep::gtid gtid_;
         wsrep::stid stid_;
         wsrep::seqno depends_on_;
         int flags_;
     };
+
+    std::string flags_to_string(int flags);
 
     static inline
     std::ostream& operator<<(std::ostream& os, const wsrep::ws_meta& ws_meta)
@@ -153,7 +195,7 @@ namespace wsrep
            << " server_id: " << ws_meta.server_id()
            << " client_id: " << ws_meta.client_id()
            << " trx_id: " << ws_meta.transaction_id()
-           << " flags: " << ws_meta.flags();
+           << " flags: " << ws_meta.flags() << " (" << wsrep::flags_to_string(ws_meta.flags()) << ")";
         return os;
     }
 
@@ -161,7 +203,6 @@ namespace wsrep
     class provider
     {
     public:
-
         class status_variable
         {
         public:
@@ -276,6 +317,8 @@ namespace wsrep
         // Write set replication
         // TODO: Rename to assing_read_view()
         virtual int start_transaction(wsrep::ws_handle&) = 0;
+        virtual enum status assign_read_view(
+            wsrep::ws_handle&, const wsrep::gtid*) = 0;
         virtual int append_key(wsrep::ws_handle&, const wsrep::key&) = 0;
         virtual enum status append_data(
             wsrep::ws_handle&, const wsrep::const_buffer&) = 0;
@@ -300,7 +343,8 @@ namespace wsrep
         virtual enum status commit_order_enter(const wsrep::ws_handle&,
                                                const wsrep::ws_meta&) = 0;
         virtual int commit_order_leave(const wsrep::ws_handle&,
-                                       const wsrep::ws_meta&) = 0;
+                                       const wsrep::ws_meta&,
+                                       const wsrep::mutable_buffer& err) = 0;
         virtual int release(wsrep::ws_handle&) = 0;
 
         /**
@@ -325,7 +369,8 @@ namespace wsrep
         /**
          * Leave total order isolation critical section
          */
-        virtual enum status leave_toi(wsrep::client_id) = 0;
+        virtual enum status leave_toi(wsrep::client_id,
+                                      const wsrep::mutable_buffer& err) = 0;
 
         /**
          * Perform a causal read on cluster.
@@ -381,20 +426,34 @@ namespace wsrep
         virtual void fetch_pfs_info(wsrep_node_info_t *nodes, uint32_t size) = 0;
 
         /**
+         * Services argument passed to make_provider. This struct contains
+         * optional services which are passed to the provider.
+         */
+        struct services
+        {
+            wsrep::thread_service* thread_service;
+            services()
+                : thread_service()
+            {
+            }
+        };
+
+        /**
          * Create a new provider.
          *
          * @param provider_spec Provider specification
          * @param provider_options Initial options to provider
+         * @param thread_service Optional thread service implementation.
          */
-        static provider* make_provider(
-            wsrep::server_state&,
-            const std::string& provider_spec,
-            const std::string& provider_options);
+        static provider* make_provider(wsrep::server_state&,
+                                       const std::string& provider_spec,
+                                       const std::string& provider_options,
+                                       const wsrep::provider::services& services
+                                       = wsrep::provider::services());
+
     protected:
         wsrep::server_state& server_state_;
     };
-
-    std::string flags_to_string(int flags);
 
     static inline bool starts_transaction(int flags)
     {

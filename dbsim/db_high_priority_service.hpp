@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2019 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -32,27 +32,33 @@ namespace db
         high_priority_service(db::server& server, db::client& client);
         int start_transaction(const wsrep::ws_handle&,
                               const wsrep::ws_meta&) override;
+        int next_fragment(const wsrep::ws_meta&) override;
         const wsrep::transaction& transaction() const override;
         int adopt_transaction(const wsrep::transaction&) override;
         int apply_write_set(const wsrep::ws_meta&,
-                            const wsrep::const_buffer&) override;
+                            const wsrep::const_buffer&,
+                            wsrep::mutable_buffer&) override;
         int append_fragment_and_commit(
             const wsrep::ws_handle&,
-            const wsrep::ws_meta&, const wsrep::const_buffer&)
-            override
+            const wsrep::ws_meta&,
+            const wsrep::const_buffer&,
+            const wsrep::xid&) override
         { return 0; }
         int remove_fragments(const wsrep::ws_meta&) override
         { return 0; }
         int commit(const wsrep::ws_handle&, const wsrep::ws_meta&) override;
         int rollback(const wsrep::ws_handle&, const wsrep::ws_meta&) override;
-        int apply_toi(const wsrep::ws_meta&, const wsrep::const_buffer&) override;
+        int apply_toi(const wsrep::ws_meta&, const wsrep::const_buffer&,
+                      wsrep::mutable_buffer&) override;
+        void adopt_apply_error(wsrep::mutable_buffer&) override;
         virtual void after_apply() override;
         void store_globals() override { }
         void reset_globals() override { }
         void switch_execution_context(wsrep::high_priority_service&) override
         { }
         int log_dummy_write_set(const wsrep::ws_handle&,
-                                const wsrep::ws_meta&) override;
+                                const wsrep::ws_meta&,
+                                wsrep::mutable_buffer&) override;
         virtual bool is_replaying() const override;
         void debug_crash(const char*) override { }
     private:
@@ -71,7 +77,7 @@ namespace db
         // After apply is empty for replayer to keep the transaction
         // context available for the client session after replaying
         // is over.
-        void after_apply() override { }
+        void after_apply() override {}
         bool is_replaying() const override { return true; }
     };
 

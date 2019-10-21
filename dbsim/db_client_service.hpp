@@ -51,8 +51,10 @@ namespace db
         {
             return true;
         }
-        int prepare_fragment_for_replication(wsrep::mutable_buffer&) override
+        int prepare_fragment_for_replication(wsrep::mutable_buffer&,
+                                             size_t& position) override
         {
+            position = 0;
             return 0;
         }
         int remove_fragments() override { return 0; }

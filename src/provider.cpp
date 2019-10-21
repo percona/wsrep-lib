@@ -22,15 +22,20 @@
 
 #include "wsrep_provider_v26.hpp"
 
+#include <dlfcn.h>
+#include <memory>
+
+
 wsrep::provider* wsrep::provider::make_provider(
     wsrep::server_state& server_state,
     const std::string& provider_spec,
-    const std::string& provider_options)
+    const std::string& provider_options,
+    const wsrep::provider::services& services)
 {
     try
     {
         return new wsrep::wsrep_provider_v26(
-            server_state, provider_options, provider_spec);
+            server_state, provider_options, provider_spec, services);
     }
     catch (const wsrep::runtime_error& e)
     {
@@ -75,7 +80,7 @@ std::string wsrep::provider::capability::str(int caps)
     WSREP_PRINT_CAPABILITY(annotation,           "ANNOTATION");
     WSREP_PRINT_CAPABILITY(preordered,           "PREORDERED");
     WSREP_PRINT_CAPABILITY(streaming,            "STREAMING");
-    WSREP_PRINT_CAPABILITY(snapshot,             "SNAPSHOT");
+    WSREP_PRINT_CAPABILITY(snapshot,             "READ_VIEW");
     WSREP_PRINT_CAPABILITY(nbo,                  "NBO");
 
 #undef WSREP_PRINT_CAPABILITY
@@ -107,7 +112,7 @@ std::string wsrep::flags_to_string(int flags)
     if (flags & provider::flag::prepare)
         oss << "prepare | ";
     if (flags & provider::flag::snapshot)
-        oss << "snapshot | ";
+        oss << "read_view | ";
     if (flags & provider::flag::implicit_deps)
         oss << "implicit_deps | ";
 

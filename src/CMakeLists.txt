@@ -7,6 +7,7 @@ add_library(wsrep-lib
   exception.cpp
   gtid.cpp
   id.cpp
+  xid.cpp
   key.cpp
   logger.cpp
   provider.cpp
@@ -14,6 +15,8 @@ add_library(wsrep-lib
   view.cpp
   server_state.cpp
   thread.cpp
+  thread_service_v1.cpp
   transaction.cpp
+  uuid.cpp
   wsrep_provider_v26.cpp)
 target_link_libraries(wsrep-lib wsrep_api_v26 pthread dl)
