@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2019 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -67,6 +67,9 @@ BOOST_FIXTURE_TEST_CASE_TEMPLATE(transaction_1pc, T,
     BOOST_REQUIRE(tc.active());
     BOOST_REQUIRE(tc.id() == wsrep::transaction_id(1));
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_executing);
+
+    // Establish default read view
+    BOOST_REQUIRE(0 == cc.assign_read_view(NULL));
 
     // Verify that the commit can be succesfully executed in separate command
     BOOST_REQUIRE(cc.after_statement() == 0);
@@ -770,8 +773,6 @@ BOOST_FIXTURE_TEST_CASE_TEMPLATE(
     BOOST_REQUIRE(cc.current_error() == wsrep::e_success);
 }
 
-
-
 //
 // Test a transaction which gets BF aborted before before_statement.
 //
@@ -925,6 +926,40 @@ BOOST_FIXTURE_TEST_CASE(
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_aborted);
     BOOST_REQUIRE(tc.active());
     cc.sync_rollback_complete();
+    BOOST_REQUIRE(cc.before_command() == 1);
+    BOOST_REQUIRE(tc.active() == false);
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+    cc.after_command_before_result();
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+    cc.after_command_after_result();
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_success);
+    BOOST_REQUIRE(tc.active() == false);
+}
+
+// Check the case where client program calls wait_rollback_complete() to
+// gain control before before_command().
+BOOST_FIXTURE_TEST_CASE(
+    transaction_1pc_bf_abort_after_after_command_after_result_sync_rm_wait_rollback,
+    replicating_client_fixture_sync_rm)
+{
+    cc.start_transaction(wsrep::transaction_id(1));
+    BOOST_REQUIRE(tc.active());
+    cc.after_statement();
+    BOOST_REQUIRE(cc.state() == wsrep::client_state::s_exec);
+    cc.after_command_before_result();
+    BOOST_REQUIRE(cc.state() == wsrep::client_state::s_result);
+    cc.after_command_after_result();
+    BOOST_REQUIRE(cc.state() == wsrep::client_state::s_idle);
+    wsrep_test::bf_abort_unordered(cc);
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_aborted);
+    BOOST_REQUIRE(tc.active());
+    cc.sync_rollback_complete();
+    BOOST_REQUIRE(cc.state() == wsrep::client_state::s_idle);
+    cc.wait_rollback_complete_and_acquire_ownership();
+    BOOST_REQUIRE(cc.state() == wsrep::client_state::s_exec);
+    // Idempotent
+    cc.wait_rollback_complete_and_acquire_ownership();
+    BOOST_REQUIRE(cc.state() == wsrep::client_state::s_exec);
     BOOST_REQUIRE(cc.before_command() == 1);
     BOOST_REQUIRE(tc.active() == false);
     BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);

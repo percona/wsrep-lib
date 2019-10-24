@@ -107,6 +107,7 @@ wsrep::transaction::transaction(
     , fragments_certified_for_statement_()
     , streaming_context_()
     , sr_keys_()
+    , apply_error_buf_()
 { }
 
 
@@ -206,6 +207,19 @@ int wsrep::transaction::prepare_for_ordering(
         certified_ = is_commit;
     }
     return 0;
+}
+
+int wsrep::transaction::assign_read_view(const wsrep::gtid* const gtid)
+{
+    try
+    {
+        return provider().assign_read_view(ws_handle_, gtid);
+    }
+    catch (...)
+    {
+        wsrep::log_error() << "Failed to assign read view";
+        return 1;
+    }
 }
 
 int wsrep::transaction::append_key(const wsrep::key& key)
@@ -456,7 +470,8 @@ int wsrep::transaction::ordered_commit()
     assert(state() == s_committing);
     assert(ordered());
     client_service_.debug_sync("wsrep_before_commit_order_leave");
-    int ret(provider().commit_order_leave(ws_handle_, ws_meta_));
+    int ret(provider().commit_order_leave(ws_handle_, ws_meta_,
+                                          apply_error_buf_));
     client_service_.debug_sync("wsrep_after_commit_order_leave");
     // Should always succeed:
     // 1) If before commit before succeeds, the transaction handle
@@ -657,6 +672,16 @@ int wsrep::transaction::after_rollback()
     return 0;
 }
 
+int wsrep::transaction::release_commit_order(
+    wsrep::unique_lock<wsrep::mutex>& lock)
+{
+    lock.unlock();
+    int ret(provider().commit_order_enter(ws_handle_, ws_meta_));
+    lock.lock();
+    return ret || provider().commit_order_leave(ws_handle_, ws_meta_,
+                                                apply_error_buf_);
+}
+
 int wsrep::transaction::after_statement()
 {
     int ret(0);
@@ -754,13 +779,7 @@ int wsrep::transaction::after_statement()
     {
         if (ordered())
         {
-            lock.unlock();
-            ret = provider().commit_order_enter(ws_handle_, ws_meta_);
-            lock.lock();
-            if (ret == 0)
-            {
-                provider().commit_order_leave(ws_handle_, ws_meta_);
-            }
+            ret = release_commit_order(lock);
         }
         provider().release(ws_handle_);
     }
@@ -782,25 +801,6 @@ void wsrep::transaction::after_applying()
     assert(state_ == s_executing ||
            state_ == s_committed ||
            state_ == s_aborted);
-
-    // We may enter here from either high priority applier or
-    // from fragment storage service. High priority applier
-    // should always have set up meta data for ordering, but
-    // fragment storage service operation may be rolled back
-    // before the fragment is ordered and certified.
-    // Therefore we need to check separately if the ordering has
-    // been done.
-    if (state_ == s_aborted && ordered())
-    {
-        lock.unlock();
-        int ret(provider().commit_order_enter(ws_handle_, ws_meta_));
-        lock.lock();
-        if (ret == 0)
-        {
-            provider().commit_order_leave(ws_handle_, ws_meta_);
-        }
-    }
-
     if (state_ != s_executing)
     {
         cleanup();
@@ -906,7 +906,7 @@ bool wsrep::transaction::bf_abort(
             // between releasing the lock and before background
             // rollbacker gets control.
             state(lock, wsrep::transaction::s_aborting);
-            client_state_.set_rollbacker(true);
+            client_state_.set_rollbacker_active(true);
 
             if (client_state_.mode() == wsrep::client_state::m_high_priority)
             {
@@ -986,21 +986,12 @@ void wsrep::transaction::state(
                     << " -> " << to_string(next_state));
 
     assert(lock.owns_lock());
-    // BF aborter is allowed to change the state to must abort and
-    // further to aborting and aborted if the background rollbacker
-    // is launched.
-    //
-    // For high priority streaming applier threads the assertion must
-    // be relaxed to check only current thread id which indicates that
-    // the store_globals() has been called before processing of write set
-    // starts.
-    assert((client_state_.owning_thread_id_ == wsrep::this_thread::get_id() ||
-            next_state == s_must_abort ||
-            next_state == s_aborting ||
-            next_state == s_aborted)
-           ||
-           (client_state_.mode() == wsrep::client_state::m_high_priority &&
-            wsrep::this_thread::get_id() == client_state_.current_thread_id_));
+    // BF aborter is allowed to change the state without gaining control
+    // to the state if the next state is s_must_abort or s_aborting.
+    assert(client_state_.owning_thread_id_ == wsrep::this_thread::get_id() ||
+           next_state == s_must_abort ||
+           next_state == s_aborting);
+
     static const char allowed[n_states][n_states] =
         { /*  ex pr ce co oc ct cf ma ab ad mr re */
             { 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0}, /* ex */
@@ -1019,11 +1010,9 @@ void wsrep::transaction::state(
 
     if (!allowed[state_][next_state])
     {
-        std::ostringstream os;
-        os << "unallowed state transition for transaction "
-           << id_ << ": " << wsrep::to_string(state_)
-           << " -> " << wsrep::to_string(next_state);
-        wsrep::log_warning() << os.str();
+        wsrep::log_debug() << "unallowed state transition for transaction "
+                           << id_ << ": " << wsrep::to_string(state_)
+                           << " -> " << wsrep::to_string(next_state);
         assert(0);
     }
 
@@ -1593,6 +1582,7 @@ void wsrep::transaction::cleanup()
     sr_keys_.clear();
     streaming_context_.cleanup();
     client_service_.cleanup_transaction();
+    apply_error_buf_.clear();
     debug_log_state("cleanup_leave");
 }
 

@@ -90,6 +90,8 @@ namespace wsrep
          */
         enum mode
         {
+            /** undefined mode */
+            m_undefined,
             /** Locally operating client session. */
             m_local,
             /** High priority mode */
@@ -134,13 +136,25 @@ namespace wsrep
         static const int state_max_ = s_quitting + 1;
 
         /**
-         * Store variables related to global execution context.
+         * Aqcuire ownership on the thread.
+         *
          * This method should be called every time the thread
-         * operating the client state changes.
+         * operating the client state changes. This method is called
+         * implicitly from before_command() and
+         * wait_rollback_complete_and_acquire_ownership().
+         */
+        void acquire_ownership()
+        {
+            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+            do_acquire_ownership(lock);
+        }
+
+        /**
+         * @deprecated Use acquire_ownership() instead.
          */
         void store_globals()
         {
-            current_thread_id_ = wsrep::this_thread::get_id();
+            acquire_ownership();
         }
 
         /**
@@ -247,6 +261,8 @@ namespace wsrep
 
         /**
          * Perform cleanup after applying a transaction.
+         *
+         * @param err Applying error (empty for no error)
          */
         void after_applying()
         {
@@ -268,6 +284,25 @@ namespace wsrep
             wsrep::unique_lock<wsrep::mutex> lock(mutex_);
             assert(state_ == s_exec);
             return transaction_.start_transaction(id);
+        }
+
+        /**
+         * Establish read view ID of the transaction.
+         *
+         * This method should be preferably called immediately before any
+         * first read or write operation in the transaction is performed,
+         * Then it can be called with default NULL parameter and will use
+         * the current last committed GTID.
+         * Alternatively it can be called at any time before commit with an
+         * explicit GTID that corresponds to transaction read view.
+         *
+         * @param gtid optional explicit GTID of the transaction read view.
+         */
+        int assign_read_view(const wsrep::gtid* const gtid = NULL)
+        {
+            assert(mode_ == m_local);
+            assert(state_ == s_exec);
+            return transaction_.assign_read_view(gtid);
         }
 
         /**
@@ -371,7 +406,7 @@ namespace wsrep
                               const wsrep::ws_meta& meta)
         {
             wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            assert(current_thread_id_ == wsrep::this_thread::get_id());
+            assert(owning_thread_id_ == wsrep::this_thread::get_id());
             assert(mode_ == m_high_priority);
             return transaction_.start_transaction(wsh, meta);
         }
@@ -381,7 +416,7 @@ namespace wsrep
         int before_prepare()
         {
             wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            assert(current_thread_id_ == wsrep::this_thread::get_id());
+            assert(owning_thread_id_ == wsrep::this_thread::get_id());
             assert(state_ == s_exec);
             return transaction_.before_prepare(lock);
         }
@@ -389,35 +424,35 @@ namespace wsrep
         int after_prepare()
         {
             wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            assert(current_thread_id_ == wsrep::this_thread::get_id());
+            assert(owning_thread_id_ == wsrep::this_thread::get_id());
             assert(state_ == s_exec);
             return transaction_.after_prepare(lock);
         }
 
         int before_commit()
         {
-            assert(current_thread_id_ == wsrep::this_thread::get_id());
+            assert(owning_thread_id_ == wsrep::this_thread::get_id());
             assert(state_ == s_exec || mode_ == m_local);
             return transaction_.before_commit();
         }
 
         int ordered_commit()
         {
-            assert(current_thread_id_ == wsrep::this_thread::get_id());
+            assert(owning_thread_id_ == wsrep::this_thread::get_id());
             assert(state_ == s_exec || mode_ == m_local);
             return transaction_.ordered_commit();
         }
 
         int after_commit()
         {
-            assert(current_thread_id_ == wsrep::this_thread::get_id());
+            assert(owning_thread_id_ == wsrep::this_thread::get_id());
             assert(state_ == s_exec || mode_ == m_local);
             return transaction_.after_commit();
         }
         /** @} */
         int before_rollback()
         {
-            assert(current_thread_id_ == wsrep::this_thread::get_id());
+            assert(owning_thread_id_ == wsrep::this_thread::get_id());
             assert(state_ == s_idle ||
                    state_ == s_exec ||
                    state_ == s_result ||
@@ -427,7 +462,7 @@ namespace wsrep
 
         int after_rollback()
         {
-            assert(current_thread_id_ == wsrep::this_thread::get_id());
+            assert(owning_thread_id_ == wsrep::this_thread::get_id());
             assert(state_ == s_idle ||
                    state_ == s_exec ||
                    state_ == s_result ||
@@ -438,16 +473,21 @@ namespace wsrep
         /**
          * This method should be called by the background rollbacker
          * thread after the rollback is complete. This will allow
-         * the client to proceed through before_command().
+         * the client to proceed through before_command() and
+         * wait_rollback_complete_and_acquire_ownership().
          */
-        void sync_rollback_complete()
-        {
-            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            assert(state_ == s_idle && mode_ == m_local &&
-                   transaction_.state() == wsrep::transaction::s_aborted);
-            set_rollbacker(false);
-            cond_.notify_all();
-        }
+        void sync_rollback_complete();
+
+        /**
+         * Wait for background rollback to complete. This method can
+         * be called before before_command() to verify that the
+         * background rollback has been finished. After the call returns,
+         * it is guaranteed that BF abort does not launch background
+         * rollback process before after_command_after_result() is called.
+         * This method is idempotent, it can be called many times
+         * by the same thread before before_command() is called.
+         */
+        void wait_rollback_complete_and_acquire_ownership();
         /** @} */
 
         //
@@ -487,6 +527,15 @@ namespace wsrep
         {
             assert(mode_ == m_high_priority);
             transaction_.adopt(transaction);
+        }
+
+        /**
+         * Adopt (store) transaction applying error for further processing.
+         */
+        void adopt_apply_error(wsrep::mutable_buffer& err)
+        {
+            assert(mode_ == m_high_priority);
+            transaction_.adopt_apply_error(err);
         }
 
         /**
@@ -539,15 +588,15 @@ namespace wsrep
          *
          * @return Zero on success, non-zero otherwise.
          */
-        int enter_toi(const wsrep::key_array& key_array,
-                      const wsrep::const_buffer& buffer,
-                      int flags);
+        int enter_toi_local(const wsrep::key_array& key_array,
+                            const wsrep::const_buffer& buffer,
+                            int flags);
         /**
-         * Enter applying total order critical section.
+         * Enter applier TOI mode
          *
          * @param ws_meta Write set meta data
          */
-        int enter_toi(const wsrep::ws_meta& ws_meta);
+        void enter_toi_mode(const wsrep::ws_meta& ws_meta);
 
         /**
          * Return true if the client_state is under TOI operation.
@@ -566,10 +615,20 @@ namespace wsrep
         {
             return toi_mode_;
         }
+
         /**
          * Leave total order isolation critical section.
+         * (for local mode clients)
+         *
+         * @param err definition of the error that happened during the
+         *            execution of TOI operation (empty for no error)
          */
-        int leave_toi();
+        int leave_toi_local(const wsrep::mutable_buffer& err);
+
+        /**
+         * Leave applier TOI mode.
+         */
+        void leave_toi_mode();
 
         /**
          * Begin rolling schema upgrade operation.
@@ -764,15 +823,14 @@ namespace wsrep
                      const client_id& id,
                      enum mode mode)
             : owning_thread_id_(wsrep::this_thread::get_id())
-            , current_thread_id_(owning_thread_id_)
-            , has_rollbacker_(false)
+            , rollbacker_active_(false)
             , mutex_(mutex)
             , cond_(cond)
             , server_state_(server_state)
             , client_service_(client_service)
             , id_(id)
             , mode_(mode)
-            , toi_mode_()
+            , toi_mode_(m_undefined)
             , state_(s_none)
             , state_hist_()
             , transaction_(*this)
@@ -794,6 +852,11 @@ namespace wsrep
         friend class client_toi_mode;
         friend class transaction;
 
+        void do_acquire_ownership(wsrep::unique_lock<wsrep::mutex>& lock);
+        // Wait for sync rollbacker to finish, with lock. Changes state
+        // to exec.
+        void do_wait_rollback_complete_and_acquire_ownership(
+            wsrep::unique_lock<wsrep::mutex>& lock);
         void update_last_written_gtid(const wsrep::gtid&);
         void debug_log_state(const char*) const;
         void state(wsrep::unique_lock<wsrep::mutex>& lock, enum state state);
@@ -806,9 +869,11 @@ namespace wsrep
                             enum wsrep::provider::status status =
                             wsrep::provider::success);
 
+        void enter_toi_common();
+        void leave_toi_common();
+
         wsrep::thread::id owning_thread_id_;
-        wsrep::thread::id current_thread_id_;
-        bool has_rollbacker_;
+        bool rollbacker_active_;
         wsrep::mutex& mutex_;
         wsrep::condition_variable& cond_;
         wsrep::server_state& server_state_;
@@ -828,18 +893,18 @@ namespace wsrep
         enum wsrep::provider::status current_error_status_;
 
         /**
-         * Assigns external rollbacker thread for the client
-         * this will block client in before_command(), until
-         * rolbacker has released the client
+         * Marks external rollbacker thread for the client
+         * as active. This will block client in before_command(), until
+         * rolbacker has released the client.
          */
-        void set_rollbacker(bool value)
+        void set_rollbacker_active(bool value)
         {
-            has_rollbacker_ = value;
+            rollbacker_active_ = value;
         }
 
-        bool has_rollbacker()
+        bool is_rollbacker_active()
         {
-            return(has_rollbacker_);
+            return rollbacker_active_;
         }
     };
 
@@ -866,6 +931,7 @@ namespace wsrep
     {
         switch (mode)
         {
+        case wsrep::client_state::m_undefined: return "undefined";
         case wsrep::client_state::m_local: return "local";
         case wsrep::client_state::m_high_priority: return "high priority";
         case wsrep::client_state::m_toi: return "toi";

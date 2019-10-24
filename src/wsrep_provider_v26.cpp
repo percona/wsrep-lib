@@ -714,6 +714,25 @@ wsrep::wsrep_provider_v26::run_applier(
     return map_return_value(wsrep_->recv(wsrep_, applier_ctx));
 }
 
+enum wsrep::provider::status
+wsrep::wsrep_provider_v26::assign_read_view(wsrep::ws_handle& ws_handle,
+                                            const wsrep::gtid* gtid)
+{
+    const wsrep_gtid_t* gtid_ptr(NULL);
+    wsrep_gtid_t tmp;
+
+    if (gtid)
+    {
+        ::memcpy(&tmp.uuid, gtid->id().data(), sizeof(tmp.uuid));
+        tmp.seqno = gtid->seqno().get();
+        gtid_ptr = &tmp;
+    }
+
+    mutable_ws_handle mwsh(ws_handle);
+    return map_return_value(wsrep_->assign_read_view(wsrep_, mwsh.native(),
+                                                     gtid_ptr));
+}
+
 int wsrep::wsrep_provider_v26::append_key(wsrep::ws_handle& ws_handle,
                                           const wsrep::key& key)
 {
@@ -738,7 +757,7 @@ int wsrep::wsrep_provider_v26::append_key(wsrep::ws_handle& ws_handle,
 
 enum wsrep::provider::status
 wsrep::wsrep_provider_v26::append_data(wsrep::ws_handle& ws_handle,
-                                           const wsrep::const_buffer& data)
+                                       const wsrep::const_buffer& data)
 {
     const wsrep_buf_t wsrep_buf = {data.data(), data.size()};
     mutable_ws_handle mwsh(ws_handle);
@@ -793,13 +812,18 @@ wsrep::wsrep_provider_v26::commit_order_enter(
         wsrep_->commit_order_enter(wsrep_, cwsh.native(), cwsm.native()));
 }
 
-int wsrep::wsrep_provider_v26::commit_order_leave(
+int
+wsrep::wsrep_provider_v26::commit_order_leave(
     const wsrep::ws_handle& ws_handle,
-    const wsrep::ws_meta& ws_meta)
+    const wsrep::ws_meta& ws_meta,
+    const wsrep::mutable_buffer& err)
 {
     const_ws_handle cwsh(ws_handle);
     const_ws_meta cwsm(ws_meta);
-    return (wsrep_->commit_order_leave(wsrep_, cwsh.native(), cwsm.native(), 0) != WSREP_OK);
+    wsrep_buf_t const err_buf = { err.data(), err.size() };
+    int ret(wsrep_->commit_order_leave(
+         wsrep_, cwsh.native(), cwsm.native(), &err_buf) != WSREP_OK);
+    return ret;
 }
 
 int wsrep::wsrep_provider_v26::release(wsrep::ws_handle& ws_handle)
@@ -856,10 +880,12 @@ wsrep::wsrep_provider_v26::enter_toi(
 }
 
 enum wsrep::provider::status
-wsrep::wsrep_provider_v26::leave_toi(wsrep::client_id client_id)
+wsrep::wsrep_provider_v26::leave_toi(wsrep::client_id client_id,
+                                     const wsrep::mutable_buffer& err)
 {
+    const wsrep_buf_t err_buf = { err.data(), err.size() };
     return map_return_value(wsrep_->to_execute_end(
-                                wsrep_, client_id.get(), 0));
+                                wsrep_, client_id.get(), &err_buf));
 }
 
 std::pair<wsrep::gtid, enum wsrep::provider::status>
