@@ -209,7 +209,7 @@ static int rollback_fragment(wsrep::server_state& server_state,
     // Adopts transaction state and starts a transaction for
     // high priority service
     int adopt_error;
-    bool remove_fragments(false);
+    // bool remove_fragments(false);
     if ((adopt_error = high_priority_service.adopt_transaction(
              streaming_applier->transaction())))
     {
@@ -224,8 +224,10 @@ static int rollback_fragment(wsrep::server_state& server_state,
             high_priority_service, *streaming_applier);
         // Streaming applier rolls back out of order. Fragment
         // removal grabs commit order below.
+#if 0
         remove_fragments = streaming_applier->transaction().
                            streaming_context().fragments().size() > 0;
+#endif
         ret = streaming_applier->rollback(wsrep::ws_handle(), wsrep::ws_meta());
         ret = ret || (streaming_applier->after_apply(), 0);
     }
@@ -237,6 +239,13 @@ static int rollback_fragment(wsrep::server_state& server_state,
 
         if (adopt_error == 0)
         {
+          ret = high_priority_service.remove_fragments(ws_meta);
+          ret = ret || high_priority_service.commit(ws_handle, ws_meta);
+          ret = ret || (high_priority_service.after_apply(), 0);
+#if 0
+          /* if fragments = 0 then there is special handling by logging
+          dummy write set but this doesn't closes the transaction started
+          as part of adopt transaction. */
             if (remove_fragments)
             {
                 ret = high_priority_service.remove_fragments(ws_meta);
@@ -252,6 +261,7 @@ static int rollback_fragment(wsrep::server_state& server_state,
                         ws_handle, ws_meta, no_error);
                 }
             }
+#endif /* 0 */
         }
     }
     return ret;
