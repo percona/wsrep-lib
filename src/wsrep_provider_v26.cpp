@@ -35,6 +35,8 @@
 
 #include "my_psi_config.h"
 
+extern void wsrep_sst_cancel(bool);
+
 extern void wsrep_pfs_instr_cb(wsrep_pfs_instr_type_t type,
                                wsrep_pfs_instr_ops_t ops,
                                wsrep_pfs_instr_tag_t tag,
@@ -580,8 +582,7 @@ namespace
 
     void abort_cb(void)
     {
-        assert(0);
-        // wsrep_sst_cancel(false);
+        wsrep_sst_cancel(false);
     }
 
 #ifdef HAVE_PSI_INTERFACE
