@@ -811,6 +811,14 @@ namespace wsrep
             return current_error_status_;
         }
 
+        /**
+         * Mark transaction for force bf abort
+         */
+        void mark_force_bf_abort()
+        {
+            transaction_.mark_force_bf_abort();
+        }
+
     protected:
         /**
          * Client context constuctor. This is protected so that it

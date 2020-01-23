@@ -226,8 +226,9 @@ int wsrep::client_state::after_statement()
     assert(state() == s_exec);
     assert(mode() == m_local);
 
-    if (transaction_.active() &&
-        transaction_.state() == wsrep::transaction::s_must_abort)
+    if ((transaction_.active() &&
+         transaction_.state() == wsrep::transaction::s_must_abort) ||
+        (transaction_.force_bf_rollback()))
     {
         lock.unlock();
         client_service_.bf_rollback();

@@ -81,6 +81,11 @@ namespace wsrep
         // fragment succeeded
         bool certified() const { return certified_; }
 
+        void mark_force_bf_abort()
+        { force_bf_rollback_ = true; }
+
+        bool force_bf_rollback() const { return force_bf_rollback_; }
+
         wsrep::seqno seqno() const
         {
             return ws_meta_.seqno();
@@ -247,6 +252,7 @@ namespace wsrep
         bool pa_unsafe_;
         bool implicit_deps_;
         bool certified_;
+        bool force_bf_rollback_;
         size_t fragments_certified_for_statement_;
         wsrep::streaming_context streaming_context_;
         wsrep::sr_key_set sr_keys_;

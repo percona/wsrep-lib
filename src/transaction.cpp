@@ -104,6 +104,7 @@ wsrep::transaction::transaction(
     , pa_unsafe_(false)
     , implicit_deps_(false)
     , certified_(false)
+    , force_bf_rollback_(false)
     , fragments_certified_for_statement_()
     , streaming_context_()
     , sr_keys_()
@@ -1577,6 +1578,7 @@ void wsrep::transaction::cleanup()
     ws_meta_ = wsrep::ws_meta();
     flags_ = 0;
     certified_ = false;
+    force_bf_rollback_ = false;
     pa_unsafe_ = false;
     implicit_deps_ = false;
     sr_keys_.clear();
