@@ -20,7 +20,10 @@
 
 /** @file compiler.hpp
  *
- * Compiler specific options.
+ * Compiler specific macro definitions.
+ *
+ * WSREP_WARN_UNUSED_RESULT - Mark function or methods so that a warning is
+ *                            raised if its return value is unused.
  */
 
 #define WSREP_UNUSED __attribute__((unused))
@@ -29,3 +32,6 @@
 #else
 #define WSREP_OVERRIDE
 #endif // __cplusplus >= 201103L
+
+/* Fetched from https://github.com/codership/wsrep-lib/pull/123/ */
+#define WSREP_WARN_UNUSED_RESULT __attribute__((warn_unused_result))
