@@ -85,8 +85,8 @@ namespace wsrep
         }
 
         size_t size() const { return buffer_.size(); }
-        char* data() { return &buffer_[0]; }
-        const char* data() const { return &buffer_[0]; }
+        char* data() { return buffer_.data(); }
+        const char* data() const { return buffer_.data(); }
 
         mutable_buffer& operator= (const mutable_buffer& other)
         {
