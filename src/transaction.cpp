@@ -921,6 +921,9 @@ bool wsrep::transaction::bf_abort(
             server_service_.background_rollback(client_state_);
         }
     }
+
+    client_service_.debug_sync("wsrep_after_bf_abort");
+
     return ret;
 }
 
