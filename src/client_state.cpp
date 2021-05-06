@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2019 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -21,9 +21,9 @@
 #include "wsrep/compiler.hpp"
 #include "wsrep/logger.hpp"
 
+#include <unistd.h> // usleep()
 #include <sstream>
 #include <iostream>
-
 
 wsrep::provider& wsrep::client_state::provider() const
 {
@@ -34,10 +34,10 @@ void wsrep::client_state::open(wsrep::client_id id)
 {
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     assert(state_ == s_none);
+    assert(keep_command_error_ == false);
     debug_log_state("open: enter");
     owning_thread_id_ = wsrep::this_thread::get_id();
-    current_thread_id_ = owning_thread_id_;
-    has_rollbacker_ = false;
+    rollbacker_active_ = false;
     sync_wait_gtid_ = wsrep::gtid::undefined();
     last_written_gtid_ = wsrep::gtid::undefined();
     state(lock, s_idle);
@@ -50,8 +50,11 @@ void wsrep::client_state::close()
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     debug_log_state("close: enter");
     state(lock, s_quitting);
+    keep_command_error_ = false;
     lock.unlock();
-    if (transaction_.active())
+    if (transaction_.active() &&
+        (mode_ != m_local ||
+         transaction_.state() != wsrep::transaction::s_prepared))
     {
         client_service_.bf_rollback();
         transaction_.after_statement();
@@ -66,6 +69,11 @@ void wsrep::client_state::close()
 void wsrep::client_state::cleanup()
 {
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    cleanup(lock);
+}
+
+void wsrep::client_state::cleanup(wsrep::unique_lock<wsrep::mutex>& lock)
+{
     debug_log_state("cleanup: enter");
     state(lock, s_none);
     debug_log_state("cleanup: leave");
@@ -75,68 +83,84 @@ void wsrep::client_state::override_error(enum wsrep::client_error error,
                                          enum wsrep::provider::status status)
 {
     assert(wsrep::this_thread::get_id() == owning_thread_id_);
-    if (current_error_ != wsrep::e_success &&
-        error == wsrep::e_success)
-    {
-        throw wsrep::runtime_error("Overriding error with success");
-    }
+    // Error state should not be cleared with success code without
+    // explicit reset_error() call.
+    assert(current_error_ == wsrep::e_success ||
+           error != wsrep::e_success);
     current_error_ = error;
     current_error_status_ = status;
 }
 
-
-int wsrep::client_state::before_command()
+int wsrep::client_state::before_command(bool keep_command_error)
 {
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     debug_log_state("before_command: enter");
-    assert(state_ == s_idle);
-    if (transaction_.active() &&
-        server_state_.rollback_mode() == wsrep::server_state::rm_sync)
+    // If the state is s_exec, the processing thread has already grabbed
+    // control with wait_rollback_complete_and_acquire_ownership()
+    if (state_ != s_exec)
     {
-        /*
-         * has_rollbacker() returns false, when background rollback is over
-         */
-        while (has_rollbacker())
-        {
-            cond_.wait(lock);
-        }
+        assert(state_ == s_idle);
+        do_wait_rollback_complete_and_acquire_ownership(lock);
+        assert(state_ == s_exec);
+        client_service_.store_globals();
     }
-    store_globals(); // Marks the control for this thread
-    state(lock, s_exec);
+    else
+    {
+        // This thread must have acquired control by other means,
+        // for example via wait_rollback_complete_and_acquire_ownership().
+        assert(wsrep::this_thread::get_id() == owning_thread_id_);
+    }
+
+    keep_command_error_ = keep_command_error;
+
+    // If the transaction is active, it must be either executing,
+    // aborted as rolled back by rollbacker, or must_abort if the
+    // client thread gained control via
+    // wait_rollback_complete_and_acquire_ownership()
+    // just before BF abort happened.
     assert(transaction_.active() == false ||
            (transaction_.state() == wsrep::transaction::s_executing ||
+            transaction_.state() == wsrep::transaction::s_prepared ||
             transaction_.state() == wsrep::transaction::s_aborted ||
-            (transaction_.state() == wsrep::transaction::s_must_abort &&
-             server_state_.rollback_mode() == wsrep::server_state::rm_async)));
+            transaction_.state() == wsrep::transaction::s_must_abort));
 
     if (transaction_.active())
     {
-        if (transaction_.state() == wsrep::transaction::s_must_abort)
+        if (transaction_.state() == wsrep::transaction::s_must_abort ||
+            transaction_.state() == wsrep::transaction::s_aborted)
         {
-            assert(server_state_.rollback_mode() ==
-                   wsrep::server_state::rm_async);
+            if (transaction_.is_xa())
+            {
+                // Client will rollback explicitly, return error.
+                debug_log_state("before_command: error");
+                return 1;
+            }
+
             override_error(wsrep::e_deadlock_error);
-            lock.unlock();
-            client_service_.bf_rollback();
-            (void)transaction_.after_statement();
-            lock.lock();
-            assert(transaction_.state() ==
-                   wsrep::transaction::s_aborted);
-            assert(transaction_.active() == false);
-            assert(current_error() != wsrep::e_success);
-            debug_log_state("before_command: error");
-            return 1;
-        }
-        else if (transaction_.state() == wsrep::transaction::s_aborted)
-        {
-            // Transaction was rolled back either just before sending result
-            // to the client, or after client_state become idle.
+            if (transaction_.state() == wsrep::transaction::s_must_abort)
+            {
+                lock.unlock();
+                client_service_.bf_rollback();
+                lock.lock();
+
+            }
+
+            if (keep_command_error_)
+            {
+                // Keep the error for the next command
+                debug_log_state("before_command: keep error");
+                return 0;
+            }
+
             // Clean up the transaction and return error.
-            override_error(wsrep::e_deadlock_error);
             lock.unlock();
             (void)transaction_.after_statement();
             lock.lock();
+
             assert(transaction_.active() == false);
+            assert(transaction_.state() == wsrep::transaction::s_aborted);
+            assert(current_error() != wsrep::e_success);
+
             debug_log_state("before_command: error");
             return 1;
         }
@@ -156,7 +180,14 @@ void wsrep::client_state::after_command_before_result()
         override_error(wsrep::e_deadlock_error);
         lock.unlock();
         client_service_.bf_rollback();
-        (void)transaction_.after_statement();
+        // If keep current error is set, the result will be propagated
+        // back to client with some future command, so keep the transaction
+        // open here so that error handling can happen in before_command()
+        // hook.
+        if (not keep_command_error_)
+        {
+            (void)transaction_.after_statement();
+        }
         lock.lock();
         assert(transaction_.state() == wsrep::transaction::s_aborted);
         assert(current_error() != wsrep::e_success);
@@ -180,10 +211,12 @@ void wsrep::client_state::after_command_after_result()
         assert(transaction_.state() == wsrep::transaction::s_aborted);
         override_error(wsrep::e_deadlock_error);
     }
-    else if (transaction_.active() == false)
+    else if (transaction_.active() == false && not keep_command_error_)
     {
         current_error_ = wsrep::e_success;
+        current_error_status_ = wsrep::provider::success;
     }
+    keep_command_error_ = false;
     sync_wait_gtid_ = wsrep::gtid::undefined();
     state(lock, s_idle);
     debug_log_state("after_command_after_result: leave");
@@ -223,8 +256,9 @@ int wsrep::client_state::after_statement()
     assert(state() == s_exec);
     assert(mode() == m_local);
 
-    if (transaction_.active() &&
-        transaction_.state() == wsrep::transaction::s_must_abort)
+    if ((transaction_.active() &&
+         transaction_.state() == wsrep::transaction::s_must_abort) ||
+        (transaction_.force_bf_rollback()))
     {
         lock.unlock();
         client_service_.bf_rollback();
@@ -256,6 +290,33 @@ int wsrep::client_state::after_statement()
     }
     debug_log_state("after_statement: success");
     return 0;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+//                      Rollbacker synchronization                          //
+//////////////////////////////////////////////////////////////////////////////
+
+void wsrep::client_state::sync_rollback_complete()
+{
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    debug_log_state("sync_rollback_complete: enter");
+    assert(state_ == s_idle && mode_ == m_local &&
+           transaction_.state() == wsrep::transaction::s_aborted);
+    set_rollbacker_active(false);
+    cond_.notify_all();
+    debug_log_state("sync_rollback_complete: leave");
+}
+
+void wsrep::client_state::wait_rollback_complete_and_acquire_ownership()
+{
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    debug_log_state("wait_rollback_complete_and_acquire_ownership: enter");
+    if (state_ == s_idle)
+    {
+        do_wait_rollback_complete_and_acquire_ownership(lock);
+    }
+    assert(state_ == s_exec);
+    debug_log_state("wait_rollback_complete_and_acquire_ownership: leave");
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -300,70 +361,152 @@ void wsrep::client_state::disable_streaming()
 //                                 TOI                                      //
 //////////////////////////////////////////////////////////////////////////////
 
-
-int wsrep::client_state::enter_toi(const wsrep::key_array& keys,
-                                   const wsrep::const_buffer& buffer,
-                                   int flags)
+enum wsrep::provider::status
+wsrep::client_state::poll_enter_toi(
+    wsrep::unique_lock<wsrep::mutex>& lock,
+    const wsrep::key_array& keys,
+    const wsrep::const_buffer& buffer,
+    wsrep::ws_meta& meta,
+    int flags,
+    std::chrono::time_point<wsrep::clock> wait_until,
+    bool& timed_out)
 {
+    WSREP_LOG_DEBUG(debug_log_level(),
+                    wsrep::log::debug_level_client_state,
+                    "poll_enter_toi: "
+                    << flags
+                    << ","
+                    << wait_until.time_since_epoch().count());
+    enum wsrep::provider::status status;
+    timed_out = false;
+    wsrep::ws_meta poll_meta; // tmp var for polling, as enter_toi may clear meta arg on errors
+    do
+    {
+        lock.unlock();
+        poll_meta = meta;
+        status = provider().enter_toi(id_, keys, buffer, poll_meta, flags);
+        if (status != wsrep::provider::success &&
+            not poll_meta.gtid().is_undefined())
+        {
+            // Successfully entered TOI, but the provider reported failure.
+            // This may happen for example if certification fails.
+            // Leave TOI before proceeding.
+            if (provider().leave_toi(id_, wsrep::mutable_buffer()))
+            {
+                wsrep::log_warning()
+                    << "Failed to leave TOI after failure in "
+                    << "poll_enter_toi()";
+            }
+            poll_meta = wsrep::ws_meta();
+        }
+        if (status == wsrep::provider::error_certification_failed ||
+            status == wsrep::provider::error_connection_failed)
+        {
+            ::usleep(300000);
+        }
+        lock.lock();
+        timed_out = !(wait_until.time_since_epoch().count() &&
+                      wsrep::clock::now() < wait_until);
+    }
+    while ((status == wsrep::provider::error_certification_failed ||
+            status == wsrep::provider::error_connection_failed) &&
+           not timed_out &&
+           not client_service_.interrupted(lock));
+    meta = poll_meta;
+    return status;
+}
+
+void wsrep::client_state::enter_toi_common(
+    wsrep::unique_lock<wsrep::mutex>& lock)
+{
+    assert(lock.owns_lock());
+    toi_mode_ = mode_;
+    mode(lock, m_toi);
+}
+
+int wsrep::client_state::enter_toi_local(const wsrep::key_array& keys,
+                                         const wsrep::const_buffer& buffer,
+                                         std::chrono::time_point<wsrep::clock> wait_until)
+{
+    debug_log_state("enter_toi_local: enter");
     assert(state_ == s_exec);
     assert(mode_ == m_local);
     int ret;
-    switch (provider().enter_toi(id_, keys, buffer, toi_meta_, flags))
+
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+
+    bool timed_out;
+    auto const status(poll_enter_toi(
+                          lock, keys, buffer,
+                          toi_meta_,
+                          wsrep::provider::flag::start_transaction |
+                          wsrep::provider::flag::commit,
+                          wait_until,
+                          timed_out));
+    switch (status)
     {
     case wsrep::provider::success:
     {
-        wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-        toi_mode_ = mode_;
-        mode(lock, m_toi);
+        enter_toi_common(lock);
         ret = 0;
         break;
     }
+    case wsrep::provider::error_certification_failed:
+        override_error(e_deadlock_error, status);
+        ret = 1;
+        break;
     default:
-        override_error(wsrep::e_error_during_commit,
-                       wsrep::provider::error_certification_failed);
+        if (timed_out) {
+            override_error(e_timeout_error);
+        } else {
+            override_error(e_error_during_commit, status);
+        }
         ret = 1;
         break;
     }
+
+    debug_log_state("enter_toi_local: leave");
     return ret;
 }
 
-int wsrep::client_state::enter_toi(const wsrep::ws_meta& ws_meta)
+void wsrep::client_state::enter_toi_mode(const wsrep::ws_meta& ws_meta)
 {
+    debug_log_state("enter_toi_mode: enter");
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     assert(mode_ == m_high_priority);
-    toi_mode_ = mode_;
-    mode(lock, m_toi);
+    enter_toi_common(lock);
     toi_meta_ = ws_meta;
-    return 0;
+    debug_log_state("enter_toi_mode: leave");
 }
 
-int wsrep::client_state::leave_toi()
+void wsrep::client_state::leave_toi_common()
 {
-    int ret(0);
-    if (toi_mode_ == m_local)
-    {
-        switch (provider().leave_toi(id_))
-        {
-        case wsrep::provider::success:
-            break;
-        default:
-            assert(0);
-            override_error(wsrep::e_error_during_commit,
-                           wsrep::provider::error_unknown);
-            ret = 1;
-            break;
-        }
-    }
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     mode(lock, toi_mode_);
-    toi_mode_ = m_local;
+    toi_mode_ = m_undefined;
     if (toi_meta_.gtid().is_undefined() == false)
     {
         update_last_written_gtid(toi_meta_.gtid());
     }
     toi_meta_ = wsrep::ws_meta();
+}
 
-    return ret;
+int wsrep::client_state::leave_toi_local(const wsrep::mutable_buffer& err)
+{
+    debug_log_state("leave_toi_local: enter");
+    assert(toi_mode_ == m_local);
+    leave_toi_common();
+
+    debug_log_state("leave_toi_local: leave");
+    return (provider().leave_toi(id_, err) == provider::success ? 0 : 1);
+}
+
+void wsrep::client_state::leave_toi_mode()
+{
+    debug_log_state("leave_toi_mode: enter");
+    assert(toi_mode_ == m_high_priority);
+    leave_toi_common();
+    debug_log_state("leave_toi_mode: leave");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -412,11 +555,187 @@ int wsrep::client_state::end_rsu()
     }
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     mode(lock, toi_mode_);
+    toi_mode_ = m_undefined;
     return ret;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+//                                 NBO                                       //
+///////////////////////////////////////////////////////////////////////////////
 
+int wsrep::client_state::begin_nbo_phase_one(
+    const wsrep::key_array& keys,
+    const wsrep::const_buffer& buffer,
+    std::chrono::time_point<wsrep::clock> wait_until)
+{
+    debug_log_state("begin_nbo_phase_one: enter");
+    debug_log_keys(keys);
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    assert(state_ == s_exec);
+    assert(mode_ == m_local);
+    assert(toi_mode_ == m_undefined);
 
+    int ret;
+    bool timed_out;
+    auto const status(poll_enter_toi(
+                          lock, keys, buffer,
+                          toi_meta_,
+                          wsrep::provider::flag::start_transaction,
+                          wait_until,
+                          timed_out));
+    switch (status)
+    {
+    case wsrep::provider::success:
+        toi_mode_ = mode_;
+        mode(lock, m_nbo);
+        ret= 0;
+        break;
+    case wsrep::provider::error_certification_failed:
+        override_error(e_deadlock_error, status);
+        ret = 1;
+        break;
+    default:
+        if (timed_out) {
+            override_error(e_timeout_error);
+        } else {
+            override_error(e_error_during_commit, status);
+        }
+        ret = 1;
+        break;
+    }
+
+    debug_log_state("begin_nbo_phase_one: leave");
+    return ret;
+}
+
+int wsrep::client_state::end_nbo_phase_one(const wsrep::mutable_buffer& err)
+{
+    debug_log_state("end_nbo_phase_one: enter");
+    assert(state_ == s_exec);
+    assert(mode_ == m_nbo);
+    assert(in_toi());
+
+    enum wsrep::provider::status status(provider().leave_toi(id_, err));
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    int ret;
+    switch (status)
+    {
+    case wsrep::provider::success:
+        ret = 0;
+        break;
+    default:
+        override_error(e_error_during_commit, status);
+        ret = 1;
+        break;
+    }
+    nbo_meta_ = toi_meta_;
+    toi_meta_ = wsrep::ws_meta();
+    toi_mode_ = m_undefined;
+    debug_log_state("end_nbo_phase_one: leave");
+    return ret;
+}
+
+int wsrep::client_state::enter_nbo_mode(const wsrep::ws_meta& ws_meta)
+{
+    assert(state_ == s_exec);
+    assert(mode_ == m_local);
+    assert(toi_mode_ == m_undefined);
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    nbo_meta_ = ws_meta;
+    mode(lock, m_nbo);
+    return 0;
+}
+
+int wsrep::client_state::begin_nbo_phase_two(
+    const wsrep::key_array& keys,
+    std::chrono::time_point<wsrep::clock> wait_until)
+{
+    debug_log_state("begin_nbo_phase_two: enter");
+    debug_log_keys(keys);
+    assert(state_ == s_exec);
+    assert(mode_ == m_nbo);
+    assert(toi_mode_ == m_undefined);
+    assert(!in_toi());
+
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    // Note: nbo_meta_ is passed to enter_toi() as it is
+    // an input param containing gtid of NBO begin.
+    // Output stored in nbo_meta_ is copied to toi_meta_ for
+    // phase two end.
+    bool timed_out;
+    enum wsrep::provider::status status(
+        poll_enter_toi(lock, keys,
+                       wsrep::const_buffer(),
+                       nbo_meta_,
+                       wsrep::provider::flag::commit,
+                       wait_until,
+                       timed_out));
+    int ret;
+    switch (status)
+    {
+    case wsrep::provider::success:
+        ret= 0;
+        toi_meta_ = nbo_meta_;
+        toi_mode_ = m_local;
+        break;
+    case wsrep::provider::error_provider_failed:
+        override_error(e_interrupted_error, status);
+        ret= 1;
+        break;
+    default:
+        if (timed_out)
+        {
+            override_error(e_timeout_error, status);
+        }
+        else
+        {
+            override_error(e_error_during_commit, status);
+        }
+        ret= 1;
+        break;
+    }
+
+    // Failed to grab TOI for completing NBO in order. This means that
+    // the operation cannot be ended in total order, so we end the
+    // NBO mode and let the DBMS to deal with the error.
+    if (ret)
+    {
+        mode(lock, m_local);
+        nbo_meta_ = wsrep::ws_meta();
+    }
+
+    debug_log_state("begin_nbo_phase_two: leave");
+    return ret;
+}
+
+int wsrep::client_state::end_nbo_phase_two(const wsrep::mutable_buffer& err)
+{
+    debug_log_state("end_nbo_phase_two: enter");
+    assert(state_ == s_exec);
+    assert(mode_ == m_nbo);
+    assert(toi_mode_ == m_local);
+    assert(in_toi());
+    enum wsrep::provider::status status(
+        provider().leave_toi(id_, err));
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    int ret;
+    switch (status)
+    {
+    case wsrep::provider::success:
+        ret = 0;
+        break;
+    default:
+        override_error(e_error_during_commit, status);
+        ret = 1;
+        break;
+    }
+    toi_meta_ = wsrep::ws_meta();
+    toi_mode_ = m_undefined;
+    nbo_meta_ = wsrep::ws_meta();
+    mode(lock, m_local);
+    debug_log_state("end_nbo_phase_two: leave");
+    return ret;
+}
 ///////////////////////////////////////////////////////////////////////////////
 //                                 Misc                                      //
 ///////////////////////////////////////////////////////////////////////////////
@@ -446,11 +765,37 @@ int wsrep::client_state::sync_wait(int timeout)
 //                               Private                                     //
 ///////////////////////////////////////////////////////////////////////////////
 
+void wsrep::client_state::do_acquire_ownership(
+    wsrep::unique_lock<wsrep::mutex>& lock WSREP_UNUSED)
+{
+    assert(lock.owns_lock());
+    // Be strict about client state for clients in local mode. The
+    // owning_thread_id_ is used to detect bugs which are caused by
+    // more than one thread operating the client state at the time,
+    // for example thread handling the client session and background
+    // rollbacker.
+    assert(state_ == s_idle || mode_ != m_local);
+    owning_thread_id_ = wsrep::this_thread::get_id();
+}
+
+void wsrep::client_state::do_wait_rollback_complete_and_acquire_ownership(
+    wsrep::unique_lock<wsrep::mutex>& lock)
+{
+    assert(lock.owns_lock());
+    assert(state_ == s_idle);
+    while (is_rollbacker_active())
+    {
+        cond_.wait(lock);
+    }
+    do_acquire_ownership(lock);
+    state(lock, s_exec);
+}
+
 void wsrep::client_state::update_last_written_gtid(const wsrep::gtid& gtid)
 {
     assert(last_written_gtid_.is_undefined() ||
            (last_written_gtid_.id() == gtid.id() &&
-            last_written_gtid_.seqno() < gtid.seqno()));
+            !(last_written_gtid_.seqno() > gtid.seqno())));
     last_written_gtid_ = gtid;
 }
 
@@ -463,27 +808,30 @@ void wsrep::client_state::debug_log_state(const char* context) const
                     << "," << to_c_string(state_)
                     << "," << to_c_string(mode_)
                     << "," << wsrep::to_string(current_error_)
-                    << ")");
-    
+                    << "," << current_error_status_
+                    << ",toi: " << toi_meta_.seqno()
+                    << ",nbo: " << nbo_meta_.seqno() << ")");
+}
+
+void wsrep::client_state::debug_log_keys(const wsrep::key_array& keys) const
+{
+    for (size_t i(0); i < keys.size(); ++i)
+    {
+        WSREP_LOG_DEBUG(debug_log_level(),
+                        wsrep::log::debug_level_client_state,
+                        "TOI keys: "
+                        << " id: " << id_
+                        << "key: " << keys[i]);
+    }
 }
 
 void wsrep::client_state::state(
     wsrep::unique_lock<wsrep::mutex>& lock WSREP_UNUSED,
     enum wsrep::client_state::state state)
 {
-    // For locally processing client states (local, toi, rsu)
-    // changing the state is allowed only from the owning thread.
-    // In high priority mode the processing thread however may
-    // change and we check only that store_globals() has been
-    // called by the current thread to gain ownership.
-    //
-    // Note that this check assumes that there is always a single
-    // thread per local client connection. This may not always
-    // hold and the sanity check mechanism may need to be revised.
-    assert((mode_ != m_high_priority &&
-            wsrep::this_thread::get_id() == owning_thread_id_) ||
-           (mode_ == m_high_priority &&
-            wsrep::this_thread::get_id() == current_thread_id_));
+    // Verify that the current thread has gained control to the
+    // connection by calling before_command()
+    assert(wsrep::this_thread::get_id() == owning_thread_id_);
     assert(lock.owns_lock());
     static const char allowed[state_max_][state_max_] =
         {
@@ -494,22 +842,19 @@ void wsrep::client_state::state(
             {  0,   1,   0,   0,     0}, /* result */
             {  1,   0,   0,   0,     0}  /* quit */
         };
-    if (allowed[state_][state])
+    if (!allowed[state_][state])
     {
-        state_hist_.push_back(state_);
-        state_ = state;
-        if (state_hist_.size() > 10)
-        {
-            state_hist_.erase(state_hist_.begin());
-        }
+        wsrep::log_warning() << "client_state: Unallowed state transition: "
+                             << state_ << " -> " << state;
+        assert(0);
     }
-    else
+    state_hist_.push_back(state_);
+    state_ = state;
+    if (state_hist_.size() > 10)
     {
-        std::ostringstream os;
-        os << "client_state: Unallowed state transition: "
-           << state_ << " -> " << state;
-        throw wsrep::runtime_error(os.str());
+        state_hist_.erase(state_hist_.begin());
     }
+
 }
 
 void wsrep::client_state::mode(
@@ -517,23 +862,21 @@ void wsrep::client_state::mode(
     enum mode mode)
 {
     assert(lock.owns_lock());
-    static const char allowed[n_modes_][n_modes_] =
-        {   /* l  h  t  r */
-            {  0, 1, 1, 1 }, /* local */
-            {  1, 0, 1, 0 }, /* high prio */
-            {  1, 1, 0, 0 }, /* toi */
-            {  1, 0, 0, 0 }  /* rsu */
-        };
-    if (allowed[mode_][mode])
-    {
-        mode_ = mode;
-    }
-    else
-    {
-        std::ostringstream os;
-        os << "client_state: Unallowed mode transition: "
-           << mode_ << " -> " << mode;
-        throw wsrep::runtime_error(os.str());
-    }
 
+    static const char allowed[n_modes_][n_modes_] =
+        {   /* u  l  h  t  r  n */
+            {  0, 0, 0, 0, 0, 0 }, /* undefined */
+            {  0, 0, 1, 1, 1, 1 }, /* local */
+            {  0, 1, 0, 1, 0, 1 }, /* high prio */
+            {  0, 1, 1, 0, 0, 0 }, /* toi */
+            {  0, 1, 0, 0, 0, 0 }, /* rsu */
+            {  0, 1, 1, 0, 0, 0 }  /* nbo */
+        };
+    if (!allowed[mode_][mode])
+    {
+        wsrep::log_warning() << "client_state: Unallowed mode transition: "
+                             << mode_ << " -> " << mode;
+        assert(0);
+    }
+    mode_ = mode;
 }

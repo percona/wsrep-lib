@@ -34,7 +34,8 @@ namespace db
         int append_fragment(const wsrep::id&,
                             wsrep::transaction_id,
                             int,
-                            const wsrep::const_buffer&) override
+                            const wsrep::const_buffer&,
+                            const wsrep::xid&) override
         { throw wsrep::not_implemented_error(); }
         int update_fragment_meta(const wsrep::ws_meta&) override
         { throw wsrep::not_implemented_error(); }

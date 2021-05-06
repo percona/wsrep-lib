@@ -51,18 +51,42 @@ namespace db
         {
             return true;
         }
-        int prepare_fragment_for_replication(wsrep::mutable_buffer&) override
+        int prepare_fragment_for_replication(wsrep::mutable_buffer&,
+                                             size_t& position) override
         {
+            position = 0;
             return 0;
         }
         int remove_fragments() override { return 0; }
         int bf_rollback() override;
         void will_replay() override { }
+        void signal_replayed() override { }
         void wait_for_replayers(wsrep::unique_lock<wsrep::mutex>&) override { }
         enum wsrep::provider::status replay()
             override;
 
+        enum wsrep::provider::status replay_unordered() override
+        {
+            return wsrep::provider::success;
+        }
+
         void emergency_shutdown() override { ::abort(); }
+
+        enum wsrep::provider::status commit_by_xid() override
+        {
+            return wsrep::provider::success;
+        }
+
+        bool is_explicit_xa() override
+        {
+            return false;
+        }
+
+        bool is_xa_rollback() override
+        {
+            return false;
+        }
+
         void debug_sync(const char*) override { }
         void debug_crash(const char*) override { }
     private:

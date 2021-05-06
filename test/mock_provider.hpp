@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2019 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -53,6 +53,9 @@ namespace wsrep
             , fragments_()
             , commit_fragments_()
             , rollback_fragments_()
+            , toi_write_sets_()
+            , toi_start_transaction_()
+            , toi_commit_()
         { }
 
         enum wsrep::provider::status
@@ -80,12 +83,11 @@ namespace wsrep
             WSREP_OVERRIDE
         {
             ws_handle = wsrep::ws_handle(ws_handle.transaction_id(), (void*)1);
-            wsrep::log_info() << "provider certify: "
-                              << "client: " << client_id.get()
-                              << " flags: " << std::hex << flags
-                              << std::dec
-                              << " certify_status: " << certify_result_;
-
+            wsrep::log_debug() << "provider certify: "
+                               << "client: " << client_id.get()
+                               << " flags: " << std::hex << flags
+                               << std::dec
+                               << " certify_status: " << certify_result_;
             if (certify_result_)
             {
                 return certify_result_;
@@ -102,7 +104,6 @@ namespace wsrep
             }
             if (rolls_back_transaction(flags))
             {
-                assert(0);
                 ++rollback_fragments_;
             }
 
@@ -143,6 +144,10 @@ namespace wsrep
             }
         }
 
+        enum wsrep::provider::status
+        assign_read_view(wsrep::ws_handle&, const wsrep::gtid*)
+            WSREP_OVERRIDE
+        { return wsrep::provider::success; }
         int append_key(wsrep::ws_handle&, const wsrep::key&)
             WSREP_OVERRIDE
         { return 0; }
@@ -168,12 +173,15 @@ namespace wsrep
         }
 
         int commit_order_leave(const wsrep::ws_handle& ws_handle,
-                               const wsrep::ws_meta& ws_meta)
+                               const wsrep::ws_meta& ws_meta,
+                               const wsrep::mutable_buffer& err)
             WSREP_OVERRIDE
         {
             BOOST_REQUIRE(ws_handle.opaque());
             BOOST_REQUIRE(ws_meta.seqno().is_undefined() == false);
-            return commit_order_leave_result_;
+            return err.size() > 0 ?
+                   wsrep::provider::error_fatal :
+                   commit_order_leave_result_;
         }
 
         int release(wsrep::ws_handle& )
@@ -191,7 +199,8 @@ namespace wsrep
             wsrep::mock_high_priority_service& high_priority_service(
                 *static_cast<wsrep::mock_high_priority_service*>(hps));
             wsrep::mock_client_state& cc(
-                *high_priority_service.client_state());
+                static_cast<wsrep::mock_client_state&>(
+                    high_priority_service.client_state()));
             wsrep::high_priority_context high_priority_context(cc);
             const wsrep::transaction& tc(cc.transaction());
             wsrep::ws_meta ws_meta;
@@ -227,14 +236,31 @@ namespace wsrep
             return wsrep::provider::success;
         }
 
-        enum wsrep::provider::status enter_toi(wsrep::client_id,
+        enum wsrep::provider::status enter_toi(wsrep::client_id client_id,
                                                const wsrep::key_array&,
                                                const wsrep::const_buffer&,
-                                               wsrep::ws_meta&,
-                                               int)
+                                               wsrep::ws_meta& toi_meta,
+                                               int flags)
             WSREP_OVERRIDE
-        { return wsrep::provider::success; }
-        enum wsrep::provider::status leave_toi(wsrep::client_id)
+        {
+            ++group_seqno_;
+            wsrep::gtid gtid(group_id_, wsrep::seqno(group_seqno_));
+            wsrep::stid stid(server_id_,
+                             wsrep::transaction_id::undefined(),
+                             client_id);
+            toi_meta = wsrep::ws_meta(gtid, stid,
+                                      wsrep::seqno(group_seqno_ - 1),
+                                      flags);
+            ++toi_write_sets_;
+            if (flags & wsrep::provider::flag::start_transaction)
+                ++toi_start_transaction_;
+            if (flags & wsrep::provider::flag::commit)
+                ++toi_commit_;
+            return certify_result_;
+        }
+
+        enum wsrep::provider::status leave_toi(wsrep::client_id,
+                                               const wsrep::mutable_buffer&)
             WSREP_OVERRIDE
         { return wsrep::provider::success; }
 
@@ -249,11 +275,16 @@ namespace wsrep
         { return wsrep::provider::success; }
         wsrep::gtid last_committed_gtid() const WSREP_OVERRIDE
         { return wsrep::gtid(); }
-        int sst_sent(const wsrep::gtid&, int) WSREP_OVERRIDE { return 0; }
-        int sst_received(const wsrep::gtid&, int) WSREP_OVERRIDE { return 0; }
+        enum wsrep::provider::status sst_sent(const wsrep::gtid&, int)
+            WSREP_OVERRIDE
+        { return wsrep::provider::success; }
+        enum wsrep::provider::status sst_received(const wsrep::gtid&, int)
+            WSREP_OVERRIDE
+        { return wsrep::provider::success; }
 
-        int enc_set_key(const wsrep::const_buffer&) WSREP_OVERRIDE 
-        { return 0; }
+        enum wsrep::provider::status enc_set_key(const wsrep::const_buffer&)
+            WSREP_OVERRIDE
+        { return wsrep::provider::success; }
 
         std::vector<status_variable> status() const WSREP_OVERRIDE
         {
@@ -268,6 +299,8 @@ namespace wsrep
         std::string version() const WSREP_OVERRIDE { return "0.0"; }
         std::string vendor() const WSREP_OVERRIDE { return "mock"; }
         void* native() const WSREP_OVERRIDE { return 0; }
+
+        void fetch_pfs_info(wsrep_node_info_t *, uint32_t ) { return; }
 
         //
         // Methods to modify mock state
@@ -304,7 +337,9 @@ namespace wsrep
         size_t fragments() const { return fragments_; }
         size_t commit_fragments() const { return commit_fragments_; }
         size_t rollback_fragments() const { return rollback_fragments_; }
-
+        size_t toi_write_sets() const { return toi_write_sets_; }
+        size_t toi_start_transaction() const { return toi_start_transaction_; }
+        size_t toi_commit() const { return toi_commit_; }
     private:
         wsrep::id group_id_;
         wsrep::id server_id_;
@@ -314,6 +349,9 @@ namespace wsrep
         size_t fragments_;
         size_t commit_fragments_;
         size_t rollback_fragments_;
+        size_t toi_write_sets_;
+        size_t toi_start_transaction_;
+        size_t toi_commit_;
     };
 }
 

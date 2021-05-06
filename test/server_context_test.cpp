@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2019 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -239,6 +239,8 @@ BOOST_FIXTURE_TEST_CASE(server_state_applying_2pc,
 BOOST_FIXTURE_TEST_CASE(server_state_applying_1pc_rollback,
                         applying_server_fixture)
 {
+    /* make sure default success result is flipped to error_fatal */
+    ss.provider().commit_order_leave_result_ = wsrep::provider::success;
     hps.fail_next_applying_ = true;
     char buf[1] = { 1 };
     BOOST_REQUIRE(ss.on_apply(hps, ws_handle, ws_meta,
@@ -252,6 +254,8 @@ BOOST_FIXTURE_TEST_CASE(server_state_applying_1pc_rollback,
 BOOST_FIXTURE_TEST_CASE(server_state_applying_2pc_rollback,
                         applying_server_fixture)
 {
+    /* make sure default success result is flipped to error_fatal */
+    ss.provider().commit_order_leave_result_ = wsrep::provider::success;
     hps.do_2pc_ = true;
     hps.fail_next_applying_ = true;
     char buf[1] = { 1 };
@@ -314,8 +318,6 @@ BOOST_AUTO_TEST_CASE(server_state_state_strings)
                       wsrep::server_state::s_synced) == "synced");
     BOOST_REQUIRE(wsrep::to_string(
                       wsrep::server_state::s_disconnecting) == "disconnecting");
-    BOOST_REQUIRE(wsrep::to_string(
-                      static_cast<enum wsrep::server_state::state>(0xff)) == "unknown");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -450,7 +452,7 @@ BOOST_FIXTURE_TEST_CASE(
 }
 
 // Error or shutdown happens during catchup phase after receiving
-// SST succesfully.
+// SST successfully.
 BOOST_FIXTURE_TEST_CASE(
     server_state_sst_first_error_on_joined,
     sst_first_server_fixture)
@@ -612,4 +614,38 @@ BOOST_FIXTURE_TEST_CASE(
     BOOST_REQUIRE(ss.state() == wsrep::server_state::s_synced);
     ss.resume_and_resync();
     BOOST_REQUIRE(ss.state() == wsrep::server_state::s_synced);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+//                               Disconnect                                //
+/////////////////////////////////////////////////////////////////////////////
+
+BOOST_FIXTURE_TEST_CASE(
+    server_state_disconnect,
+    sst_first_server_fixture)
+{
+    bootstrap();
+    ss.disconnect();
+    BOOST_REQUIRE(ss.state() == wsrep::server_state::s_disconnecting);
+    final_view();
+    BOOST_REQUIRE(ss.state() == wsrep::server_state::s_disconnected);
+}
+
+// This test case verifies that the disconnect can be initiated
+// concurrently by several callers. This may happen in failure situations
+// where provider shutdown causes cascading failures and the failing operations
+// try to disconnect the provider.
+BOOST_FIXTURE_TEST_CASE(
+    server_state_disconnect_twice,
+    sst_first_server_fixture)
+{
+    bootstrap();
+    ss.disconnect();
+    BOOST_REQUIRE(ss.state() == wsrep::server_state::s_disconnecting);
+    ss.disconnect();
+    BOOST_REQUIRE(ss.state() == wsrep::server_state::s_disconnecting);
+    final_view();
+    BOOST_REQUIRE(ss.state() == wsrep::server_state::s_disconnected);
+    ss.disconnect();
+    BOOST_REQUIRE(ss.state() == wsrep::server_state::s_disconnected);
 }

@@ -45,8 +45,8 @@ namespace wsrep
             , rollback_replicated_for_()
             , fragment_unit_()
             , fragment_size_()
-            , bytes_certified_()
             , unit_counter_()
+            , log_position_()
         { }
 
         /**
@@ -101,10 +101,9 @@ namespace wsrep
             fragment_size_ = 0;
         }
 
-        void certified(size_t bytes)
+        void certified()
         {
             ++fragments_certified_;
-            bytes_certified_ += bytes;
         }
 
         size_t fragments_certified() const
@@ -128,11 +127,6 @@ namespace wsrep
             check_fragment_seqno(seqno);
             ++fragments_certified_;
             fragments_.push_back(seqno);
-        }
-
-        size_t bytes_certified() const
-        {
-            return bytes_certified_;
         }
 
         void rolled_back(wsrep::transaction_id id)
@@ -167,6 +161,16 @@ namespace wsrep
             unit_counter_ = 0;
         }
 
+        size_t log_position() const
+        {
+            return log_position_;
+        }
+
+        void set_log_position(size_t position)
+        {
+            log_position_ = position;
+        }
+
         const std::vector<wsrep::seqno>& fragments() const
         {
             return fragments_;
@@ -182,8 +186,8 @@ namespace wsrep
             fragments_certified_ = 0;
             fragments_.clear();
             rollback_replicated_for_ = wsrep::transaction_id::undefined();
-            bytes_certified_ = 0;
             unit_counter_ = 0;
+            log_position_ = 0;
         }
     private:
 
@@ -198,8 +202,8 @@ namespace wsrep
         wsrep::transaction_id rollback_replicated_for_;
         enum fragment_unit fragment_unit_;
         size_t fragment_size_;
-        size_t bytes_certified_;
         size_t unit_counter_;
+        size_t log_position_;
     };
 }
 

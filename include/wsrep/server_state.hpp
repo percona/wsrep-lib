@@ -90,10 +90,18 @@
 #include "logger.hpp"
 #include "provider.hpp"
 #include "compiler.hpp"
+#include "xid.hpp"
 
 #include <vector>
 #include <string>
 #include <map>
+
+/**
+ * Magic string to tell provider to engage into trivial (empty)
+ * state transfer. No data will be passed, but the node shall be
+ * considered joined.
+ */
+#define WSREP_LIB_SST_TRIVIAL "trivial"
 
 namespace wsrep
 {
@@ -155,7 +163,7 @@ namespace wsrep
             s_connected,
             /** Server is receiving SST */
             s_joiner,
-            /** Server has received SST succesfully but has not synced
+            /** Server has received SST successfully but has not synced
               with rest of the cluster yet. */
             s_joined,
             /** Server is donating state snapshot transfer */
@@ -178,7 +186,6 @@ namespace wsrep
             /** Synchronous rollback mode */
             rm_sync
         };
-
 
         virtual ~server_state();
 
@@ -250,23 +257,35 @@ namespace wsrep
 
         void stop_streaming_applier(
             const wsrep::id&, const wsrep::transaction_id&);
+
         /**
-         * Return reference to streaming applier.
+         * Find a streaming applier matching server and transaction ids
          */
         wsrep::high_priority_service* find_streaming_applier(
             const wsrep::id&,
             const wsrep::transaction_id&) const;
+
+        /**
+         * Find a streaming applier matching xid
+         */
+        wsrep::high_priority_service* find_streaming_applier(
+            const wsrep::xid& xid) const;
+
         /**
          * Load WSRep provider.
          *
          * @param provider WSRep provider library to be loaded.
          * @param provider_options Provider specific options string
          *        to be passed for provider during initialization.
+         * @param services Application defined services passed to
+         *                 the provider.
          *
          * @return Zero on success, non-zero on error.
          */
         int load_provider(const std::string& provider,
-                          const std::string& provider_options);
+                          const std::string& provider_options,
+                          const wsrep::provider::services& services
+                          = wsrep::provider::services());
 
         void unload_provider();
 
@@ -450,6 +469,12 @@ namespace wsrep
         void resume_and_resync();
 
         /**
+         * True if server has issued and active desync and pause in one go,
+         * false otherwise.
+         */
+        bool desynced_on_pause() const { return desynced_on_pause_; }
+
+        /**
          * Prepares server state for SST.
          *
          * @return String containing a SST request
@@ -482,8 +507,11 @@ namespace wsrep
          *
          * @param client_service
          * @param error code of the SST operation
+         * @param awaiting_callback is cleared if sst receieved is signal
+         *                          to galera module
          */
-        void sst_received(wsrep::client_service& cs, int error);
+        void sst_received(wsrep::client_service &cs, int error,
+                          bool *awaiting_callback = NULL);
 
         /**
          * This method must be called after the server initialization
@@ -498,6 +526,19 @@ namespace wsrep
         bool is_initialized() const
         {
             wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+            return init_initialized_;
+        }
+
+        /**
+         * Return true if the server has been initialized.
+         */
+        bool is_initialized_unprotected() const
+        {
+            /* this unprotected version is meant to be used only to check
+            server initialization state to decide flush of error log messages.
+            If flow hits error before server is initialized then such error
+            messages are flushed immediately. */
+            // wsrep::unique_lock<wsrep::mutex> lock(mutex_);
             return init_initialized_;
         }
 

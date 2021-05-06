@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2019 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -102,7 +102,7 @@ namespace wsrep
         {
             mock_high_priority_service* mhps(
                 static_cast<mock_high_priority_service*>(high_priority_service));
-            wsrep::mock_client* cs(static_cast<wsrep::mock_client*>(
+            wsrep::mock_client* cs(&static_cast<wsrep::mock_client&>(
                                        mhps->client_state()));
             cs->after_command_before_result();
             cs->after_command_after_result();
@@ -156,6 +156,13 @@ namespace wsrep
         {
             return position_;
         }
+
+        void set_position(wsrep::client_service&,
+                          const wsrep::gtid& gtid) WSREP_OVERRIDE
+        {
+            position_ = gtid;
+        }
+
         void log_state_change(enum wsrep::server_state::state,
                               enum wsrep::server_state::state)
             WSREP_OVERRIDE

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2019 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -35,6 +35,11 @@ int db::high_priority_service::start_transaction(
     return client_.client_state().start_transaction(ws_handle, ws_meta);
 }
 
+int db::high_priority_service::next_fragment(const wsrep::ws_meta& ws_meta)
+{
+    return client_.client_state().next_fragment(ws_meta);
+}
+
 const wsrep::transaction& db::high_priority_service::transaction() const
 {
     return client_.client_state().transaction();
@@ -47,7 +52,8 @@ int db::high_priority_service::adopt_transaction(const wsrep::transaction&)
 
 int db::high_priority_service::apply_write_set(
     const wsrep::ws_meta&,
-    const wsrep::const_buffer&)
+    const wsrep::const_buffer&,
+    wsrep::mutable_buffer&)
 {
     client_.se_trx_.start(&client_);
     client_.se_trx_.apply(client_.client_state().transaction());
@@ -56,7 +62,16 @@ int db::high_priority_service::apply_write_set(
 
 int db::high_priority_service::apply_toi(
     const wsrep::ws_meta&,
-    const wsrep::const_buffer&)
+    const wsrep::const_buffer&,
+    wsrep::mutable_buffer&)
+{
+    throw wsrep::not_implemented_error();
+}
+
+int db::high_priority_service::apply_nbo_begin(
+    const wsrep::ws_meta&,
+    const wsrep::const_buffer&,
+    wsrep::mutable_buffer&)
 {
     throw wsrep::not_implemented_error();
 }
@@ -84,6 +99,11 @@ int db::high_priority_service::rollback(const wsrep::ws_handle& ws_handle,
     return ret;
 }
 
+void db::high_priority_service::adopt_apply_error(wsrep::mutable_buffer& err)
+{
+    client_.client_state_.adopt_apply_error(err);
+}
+
 void db::high_priority_service::after_apply()
 {
     client_.client_state_.after_applying();
@@ -91,17 +111,22 @@ void db::high_priority_service::after_apply()
 
 int db::high_priority_service::log_dummy_write_set(
     const wsrep::ws_handle& ws_handle,
-    const wsrep::ws_meta& ws_meta)
+    const wsrep::ws_meta& ws_meta,
+    wsrep::mutable_buffer& err)
 {
     int ret(client_.client_state_.start_transaction(ws_handle, ws_meta));
     assert(ret == 0);
-    client_.client_state_.prepare_for_ordering(ws_handle, ws_meta, true);
-    ret = client_.client_state_.before_commit();
-    assert(ret == 0);
-    ret = client_.client_state_.ordered_commit();
-    assert(ret == ret);
-    ret = client_.client_state_.after_commit();
-    assert(ret == 0);
+    if (ws_meta.ordered())
+    {
+        client_.client_state_.adopt_apply_error(err);
+        client_.client_state_.prepare_for_ordering(ws_handle, ws_meta, true);
+        ret = client_.client_state_.before_commit();
+        assert(ret == 0);
+        ret = client_.client_state_.ordered_commit();
+        assert(ret == 0);
+        ret = client_.client_state_.after_commit();
+        assert(ret == 0);
+    }
     client_.client_state_.after_applying();
     return ret;
 }

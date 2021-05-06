@@ -24,6 +24,7 @@
 #ifndef WSREP_HIGH_PRIORITY_SERVICE_HPP
 #define WSREP_HIGH_PRIORITY_SERVICE_HPP
 
+#include "xid.hpp"
 #include "server_state.hpp"
 
 namespace wsrep
@@ -41,7 +42,7 @@ namespace wsrep
         virtual ~high_priority_service() { }
 
         int apply(const ws_handle& ws_handle, const ws_meta& ws_meta,
-                          const const_buffer& data)
+                  const const_buffer& data)
         {
             return server_state_.on_apply(*this, ws_handle, ws_meta, data);
         }
@@ -50,6 +51,11 @@ namespace wsrep
          */
         virtual int start_transaction(const wsrep::ws_handle&,
                                       const wsrep::ws_meta&) = 0;
+
+        /**
+         * Start the next fragment of current transaction
+         */
+        virtual int next_fragment(const wsrep::ws_meta&) = 0;
 
         /**
          * Return transaction object associated to high priority
@@ -70,9 +76,13 @@ namespace wsrep
          * new transaction before applying a write set and must
          * either commit to make changes persistent or roll back.
          *
+         * @params ws_meta Write set meta data
+         * @params ws Write set buffer
+         * @params err Buffer to store error data
          */
-        virtual int apply_write_set(const wsrep::ws_meta&,
-                                    const wsrep::const_buffer&) = 0;
+        virtual int apply_write_set(const wsrep::ws_meta& ws_meta,
+                                    const wsrep::const_buffer& ws,
+                                    wsrep::mutable_buffer& err) = 0;
 
         /**
          * Append a fragment into fragment storage. This will be
@@ -87,7 +97,8 @@ namespace wsrep
         virtual int append_fragment_and_commit(
             const wsrep::ws_handle& ws_handle,
             const wsrep::ws_meta& ws_meta,
-            const wsrep::const_buffer& data) = 0;
+            const wsrep::const_buffer& data,
+            const wsrep::xid& xid) = 0;
 
         /**
          * Remove fragments belonging to streaming transaction.
@@ -141,9 +152,35 @@ namespace wsrep
          *
          * TOI operation is a standalone operation and should not
          * be executed as a part of a transaction.
+         *
+         * @params ws_meta Write set meta data
+         * @params ws Write set buffer
+         * @params err Buffer to store error data
          */
-        virtual int apply_toi(const wsrep::ws_meta&,
-                              const wsrep::const_buffer&) = 0;
+        virtual int apply_toi(const wsrep::ws_meta& ws_meta,
+                              const wsrep::const_buffer& ws,
+                              wsrep::mutable_buffer& err) = 0;
+
+        /**
+         * Apply NBO begin event.
+         *
+         * The responsibility of the implementation is to start
+         * an asynchronous process which will complete the operation.
+         * The call is done under total order isolation, and the
+         * isolation is released by the caller after the method
+         * returns. It is a responsibility of the asynchronous process
+         * to complete the second phase of NBO.
+         *
+         * @param ws_meta Write set meta data.
+         * @param data Buffer containing the command to execute.
+         * @params err Buffer to store error data
+         *
+         * @return Zero in case of success, non-zero if the asynchronous
+         *         process could not be started.
+         */
+        virtual int apply_nbo_begin(const wsrep::ws_meta& ws_meta,
+                                    const wsrep::const_buffer& data,
+                                    wsrep::mutable_buffer& err) = 0;
 
         /**
          * Actions to take after applying a write set was completed.
@@ -175,11 +212,19 @@ namespace wsrep
          *
          * @params ws_handle Write set handle
          * @params ws_meta Write set meta data
+         * @params err Optional applying error data buffer, may be modified
          *
          * @return Zero in case of success, non-zero on failure
          */
         virtual int log_dummy_write_set(const ws_handle& ws_handle,
-                                        const ws_meta& ws_meta) = 0;
+                                        const ws_meta& ws_meta,
+                                        wsrep::mutable_buffer& err) = 0;
+
+        /**
+         * Adopt (store) apply error description for further reporting
+         * to provider, source buffer may be modified.
+         */
+        virtual void adopt_apply_error(wsrep::mutable_buffer& err) = 0;
 
         virtual bool is_replaying() const = 0;
 
@@ -189,6 +234,7 @@ namespace wsrep
          * Debug facility to crash the server at given point.
          */
         virtual void debug_crash(const char* crash_point) = 0;
+
     protected:
         wsrep::server_state& server_state_;
         bool must_exit_;
