@@ -215,21 +215,6 @@ static int rollback_fragment(wsrep::server_state& server_state,
                              const wsrep::ws_meta& ws_meta)
 {
     int ret(0);
-<<<<<<< HEAD
-    // Adopts transaction state and starts a transaction for
-    // high priority service
-    int adopt_error;
-    // bool remove_fragments(false);
-    if ((adopt_error = high_priority_service.adopt_transaction(
-             streaming_applier->transaction())))
-||||||| 58aa3e8
-    // Adopts transaction state and starts a transaction for
-    // high priority service
-    int adopt_error;
-    bool remove_fragments(false);
-    if ((adopt_error = high_priority_service.adopt_transaction(
-             streaming_applier->transaction())))
-=======
     int adopt_error(0);
     bool const remove_fragments(streaming_applier->transaction().
                                 streaming_context().fragments().size() > 0);
@@ -238,7 +223,6 @@ static int rollback_fragment(wsrep::server_state& server_state,
     if (remove_fragments &&
         (adopt_error = high_priority_service.adopt_transaction(
           streaming_applier->transaction())))
->>>>>>> cs/master
     {
         log_adopt_error(streaming_applier->transaction());
     }
@@ -251,16 +235,6 @@ static int rollback_fragment(wsrep::server_state& server_state,
             high_priority_service, *streaming_applier);
         // Streaming applier rolls back out of order. Fragment
         // removal grabs commit order below.
-<<<<<<< HEAD
-#if 0
-        remove_fragments = streaming_applier->transaction().
-                           streaming_context().fragments().size() > 0;
-#endif
-||||||| 58aa3e8
-        remove_fragments = streaming_applier->transaction().
-                           streaming_context().fragments().size() > 0;
-=======
->>>>>>> cs/master
         ret = streaming_applier->rollback(wsrep::ws_handle(), wsrep::ws_meta());
         ret = ret || (streaming_applier->after_apply(), 0);
     }
@@ -272,29 +246,24 @@ static int rollback_fragment(wsrep::server_state& server_state,
 
         if (adopt_error == 0)
         {
-          ret = high_priority_service.remove_fragments(ws_meta);
-          ret = ret || high_priority_service.commit(ws_handle, ws_meta);
-          ret = ret || (high_priority_service.after_apply(), 0);
-#if 0
           /* if fragments = 0 then there is special handling by logging
           dummy write set but this doesn't closes the transaction started
           as part of adopt transaction. */
-            if (remove_fragments)
-            {
-                ret = high_priority_service.remove_fragments(ws_meta);
-                ret = ret || high_priority_service.commit(ws_handle, ws_meta);
-                ret = ret || (high_priority_service.after_apply(), 0);
-            }
-            else
-            {
-                if (ws_meta.ordered())
-                {
-                    wsrep::mutable_buffer no_error;
-                    ret = high_priority_service.log_dummy_write_set(
-                        ws_handle, ws_meta, no_error);
-                }
-            }
-#endif /* 0 */
+          if (remove_fragments)
+          {
+              ret = high_priority_service.remove_fragments(ws_meta);
+              ret = ret || high_priority_service.commit(ws_handle, ws_meta);
+              ret = ret || (high_priority_service.after_apply(), 0);
+          }
+          else
+          {
+              if (ws_meta.ordered())
+              {
+                  wsrep::mutable_buffer no_error;
+                  ret = high_priority_service.log_dummy_write_set(
+                      ws_handle, ws_meta, no_error);
+              }
+          }
         }
     }
     return ret;
@@ -820,7 +789,6 @@ void wsrep::server_state::sst_received(wsrep::client_service& cs,
         lock.unlock();
     }
 
-<<<<<<< HEAD
     if (awaiting_callback) {
       /* Mark that callback has been delivered to galera.
          With error case above, it is possible that the it will not be delivered
@@ -828,13 +796,8 @@ void wsrep::server_state::sst_received(wsrep::client_service& cs,
       *awaiting_callback = false;
     }
 
-    if (provider().sst_received(gtid, error))
-||||||| 58aa3e8
-    if (provider().sst_received(gtid, error))
-=======
     enum provider::status const retval(provider().sst_received(gtid, error));
     if (retval != provider::success)
->>>>>>> cs/master
     {
         std::string msg("wsrep::sst_received() failed: ");
         msg += wsrep::provider::to_string(retval);

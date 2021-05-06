@@ -417,14 +417,11 @@ namespace wsrep
         virtual void* native() const = 0;
 
         /**
-<<<<<<< HEAD
          * Fetch cluster node information to populate PXC cluster view table.
          */
         virtual void fetch_pfs_info(wsrep_node_info_t *nodes, uint32_t size) = 0;
 
         /**
-||||||| 58aa3e8
-=======
          * Services argument passed to make_provider. This struct contains
          * optional services which are passed to the provider.
          */
@@ -439,7 +436,6 @@ namespace wsrep
             }
         };
         /**
->>>>>>> cs/master
          * Create a new provider.
          *
          * @param provider_spec Provider specification

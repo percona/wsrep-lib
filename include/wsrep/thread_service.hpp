@@ -78,7 +78,7 @@ namespace wsrep
          * This unlike others is a function pointer to
          * avoid having C++ methods on thread exit codepath.
          */
-        WSREP_NORETURN void (*exit)(thread*, void* retval);
+        void (*exit)(thread*, void* retval);
         virtual int join(thread*, void** retval) WSREP_NOEXCEPT = 0;
         virtual thread* self() WSREP_NOEXCEPT = 0;
         virtual int setschedparam(thread*, int,

@@ -129,11 +129,6 @@ int wsrep::client_state::before_command(bool keep_command_error)
         if (transaction_.state() == wsrep::transaction::s_must_abort ||
             transaction_.state() == wsrep::transaction::s_aborted)
         {
-<<<<<<< HEAD
-||||||| 58aa3e8
-            assert(server_state_.rollback_mode() ==
-                   wsrep::server_state::rm_async);
-=======
             if (transaction_.is_xa())
             {
                 // Client will rollback explicitly, return error.
@@ -141,7 +136,6 @@ int wsrep::client_state::before_command(bool keep_command_error)
                 return 1;
             }
 
->>>>>>> cs/master
             override_error(wsrep::e_deadlock_error);
             if (transaction_.state() == wsrep::transaction::s_must_abort)
             {

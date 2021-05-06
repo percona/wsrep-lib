@@ -37,7 +37,7 @@
  */
 
 
-#if __cplusplus >= 201103L && !(__GNUC__ == 4 && __GNUG_MINOR__ < 8)
+#if __cplusplus >= 201103L && !(defined(__GNUC__) && defined(__GNUG_MINOR__) && __GNUC__ == 4 && __GNUG_MINOR__ < 8)
 #define WSREP_NORETURN [[noreturn]]
 #else
 #define WSREP_NORETURN __attribute__((noreturn))
