@@ -34,7 +34,6 @@
 
 namespace wsrep
 {
-    class transaction;
     class client_service
     {
     public:
@@ -89,12 +88,17 @@ namespace wsrep
 
         /**
          * Prepare a buffer containing data for the next fragment to replicate.
+         * The caller may set log_position to record the database specific
+         * position corresponding to changes contained in the buffer.
+         * When the call returns, the log_position will be available to read
+         * from streaming_context::log_position().
          *
          * @return Zero in case of success, non-zero on failure.
          *         If there is no data to replicate, the method shall return
          *         zero and leave the buffer empty.
          */
-        virtual int prepare_fragment_for_replication(wsrep::mutable_buffer&) = 0;
+        virtual int prepare_fragment_for_replication(wsrep::mutable_buffer& buffer,
+                                                     size_t& log_position) = 0;
 
         /**
          * Remove fragments from the storage within current transaction.
@@ -142,6 +146,11 @@ namespace wsrep
         virtual void will_replay() = 0;
 
         /**
+         * Signal that replay is done.
+         */
+        virtual void signal_replayed() = 0;
+
+        /**
          * Replay the current transaction. The implementation must put
          * the caller Client Context into applying mode and call
          * client_state::replay().
@@ -152,6 +161,13 @@ namespace wsrep
         virtual enum wsrep::provider::status replay() = 0;
 
         /**
+         * Replay the current transaction. This is used for replaying
+         * prepared XA transactions, which are BF aborted but not
+         * while orderding commit / rollback.
+         */
+        virtual enum wsrep::provider::status replay_unordered() = 0;
+
+        /**
          * Wait until all replaying transactions have been finished
          * replaying.
          *
@@ -159,6 +175,32 @@ namespace wsrep
          * handled internally by wsrep-lib.
          */
         virtual void wait_for_replayers(wsrep::unique_lock<wsrep::mutex>&) = 0;
+
+        //
+        // XA
+        //
+        /**
+         * Send a commit by xid
+         */
+        virtual enum wsrep::provider::status commit_by_xid() = 0;
+
+        /**
+         * Returns true if the client has an ongoing XA transaction.
+         * This method is used to determine when to cleanup the
+         * corresponding wsrep-lib transaction object.
+         * This method should return false when the XA transaction
+         * is over, and the wsrep-lib transaction object can be
+         * cleaned up.
+         */
+        virtual bool is_explicit_xa() = 0;
+
+        /**
+         * Returns true if the currently executing command is
+         * a rollback for XA. This is used to avoid setting a
+         * a deadlock error rollback as it may be unexpected
+         * by the DBMS.
+         */
+        virtual bool is_xa_rollback() = 0;
 
         //
         // Debug interface
@@ -175,15 +217,6 @@ namespace wsrep
          * been enabled.
          */
         virtual void debug_crash(const char* crash_point) = 0;
-    };
-
-    /**
-     * Debug callback methods. These methods are called only in
-     * builds that have WITH_DEBUG defined.
-     */
-    class client_debug_callback
-    {
-    public:
     };
 }
 

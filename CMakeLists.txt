@@ -26,6 +26,8 @@ else()
 endif()
 
 include(CheckIncludeFile)
+include(CheckLibraryExists)
+include(CheckCXXCompilerFlag)
 
 # Options
 
@@ -67,19 +69,43 @@ if (NOT CMAKE_CXX_STANDARD OR CMAKE_CXX_STANDARD LESS 11)
   endif()
 endif()
 
+# C flags
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wconversion")
 # CXX flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Woverloaded-virtual -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Woverloaded-virtual -Wconversion -g")
+check_cxx_compiler_flag("-Wsuggest-override" HAVE_SUGGEST_OVERRIDE)
+if (HAVE_SUGGEST_OVERRIDE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wsuggest-override")
+endif()
 
 if (WSREP_LIB_STRICT_BUILD_FLAGS)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Weffc++")
 endif()
 if (WSREP_LIB_MAINTAINER_MODE)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+endif()
+
+# Enable extra libstdc++ assertions with debug build.
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+  add_definitions("-D_GLIBCXX_ASSERTIONS")
+else()
+  # Make sure that NDEBUG is enabled in release builds even
+  # if the parent project does not define it.
+  add_definitions("-DNDEBUG")
 endif()
 
 # Set up include directories
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/include")
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/wsrep-API/v26")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/wsrep-API")
+
+# Find libraries.
+CHECK_LIBRARY_EXISTS(dl dlopen "" WSREP_LIB_HAVE_LIBDL)
+if (WSREP_LIB_HAVE_LIBDL)
+  set(WSREP_LIB_LIBDL "dl")
+else()
+  set(WSREP_LIB_LIBDL "")
+endif()
 
 if (WSREP_LIB_WITH_UNIT_TESTS)
   find_package(Boost 1.54.0 REQUIRED
@@ -95,21 +121,6 @@ if (WSREP_LIB_WITH_DBSIM)
     )
 endif()
 
-# Coverage
-# To produce a coverage report, call cmake with -DWITH_COVERAGE=ON,
-# run
-#
-#   make
-#   make test
-#   make ExperimentalCoverage
-#   make coverage_report
-#
-# The coverage report output will be in directory root index.html
-#
-if (WSREP_LIB_WITH_COVERAGE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-arcs -ftest-coverage")
-endif()
 if (WSREP_LIB_WITH_ASAN)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
 endif()
@@ -117,8 +128,24 @@ if (WSREP_LIB_WITH_TSAN)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread")
 endif()
 
+# Coverage
+#
+# To produce a coverage report, call cmake with -DWITH_COVERAGE=ON,
+# run
+#
+#   make
+#   make test
+#   make coverage_report
+#
+# The coverage report output will be in directory coverage_report/index.html
+#
+if (WSREP_LIB_WITH_COVERAGE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-arcs -ftest-coverage")
+endif()
+
 add_custom_target(coverage_report
-  lcov --capture --directory src --directory test --directory dbsim --directory include --output lcov.info --no-external
+  lcov --base-directory ${CMAKE_CURRENT_SOURCE_DIR} --capture --directory ${CMAKE_CURRENT_BINARY_DIR} --output lcov.info --no-external --quiet
   COMMAND genhtml --output-directory coverage_report lcov.info)
 
 

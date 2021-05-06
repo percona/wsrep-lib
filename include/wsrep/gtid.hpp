@@ -22,8 +22,15 @@
 
 #include "id.hpp"
 #include "seqno.hpp"
+#include "compiler.hpp"
 
 #include <iosfwd>
+
+/**
+ * Minimum number of bytes guaratneed to store GTID string representation,
+ * terminating '\0' not included (36 + 1 + 20).
+ */
+#define WSREP_LIB_GTID_C_STR_LEN 57
 
 namespace wsrep
 {
@@ -62,22 +69,61 @@ namespace wsrep
     };
 
     /**
+     * Scan a GTID from C string.
+     *
+     * @param buf Buffer containing the string
+     * @param len Length of buffer
+     * @param[out] gtid Gtid to be printed to
+     *
+     * @return Number of bytes scanned, negative value on error.
+     */
+    ssize_t scan_from_c_str(const char* buf, size_t buf_len,
+                            wsrep::gtid& gtid);
+
+    /*
+     * Deprecated version of the above for backwards compatibility.
+     * Will be removed when all the superprojects have been updated.
+     */
+    static inline ssize_t gtid_scan_from_c_str(const char* buf, size_t buf_len,
+                                               wsrep::gtid& gtid)
+    {
+        return scan_from_c_str(buf, buf_len, gtid);
+    }
+
+    /**
      * Print a GTID into character buffer.
+     *
+     * @param gtid GTID to be printed.
      * @param buf Pointer to the beginning of the buffer
      * @param buf_len Buffer length
      *
      * @return Number of characters printed or negative value for error
      */
-    ssize_t gtid_print_to_c_str(const wsrep::gtid&, char* buf, size_t buf_len);
-    /**
-     * Return minimum number of bytes guaranteed to store GTID string
-     * representation, terminating '\0' not included (36 + 1 + 20)
+    ssize_t print_to_c_str(const wsrep::gtid& gtid, char* buf, size_t buf_len);
+
+    /*
+     * Deprecated version of the above for backwards compatibility.
+     * Will be removed when all the superprojects have been updated.
      */
-    static inline size_t gtid_c_str_len()
+    static inline ssize_t gtid_print_to_c_str(const wsrep::gtid& gtid,
+                                              char* buf, size_t buf_len)
     {
-        return 57;
+        return print_to_c_str(gtid, buf, buf_len);
     }
+
+    /**
+     * Return minimum number of chars required to store any GTID.
+     */
+    static inline size_t gtid_c_str_len() { return WSREP_LIB_GTID_C_STR_LEN; }
+
+    /**
+     * Overload for ostream operator<<.
+     */
     std::ostream& operator<<(std::ostream&, const wsrep::gtid&);
+
+    /**
+     * Overload for istream operator>>.
+     */
     std::istream& operator>>(std::istream&, wsrep::gtid&);
 }
 

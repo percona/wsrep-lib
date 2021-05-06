@@ -129,8 +129,9 @@ static int apply_fragment(wsrep::server_state& server_state,
         if (!apply_err)
         {
             high_priority_service.debug_crash("crash_apply_cb_before_append_frag");
+            const wsrep::xid xid(streaming_applier->transaction().xid());
             ret = high_priority_service.append_fragment_and_commit(
-                ws_handle, ws_meta, data);
+                ws_handle, ws_meta, data, xid);
             high_priority_service.debug_crash("crash_apply_cb_after_append_frag");
             ret = ret || (high_priority_service.after_apply(), 0);
         }
@@ -146,7 +147,6 @@ static int apply_fragment(wsrep::server_state& server_state,
 
     return ret;
 }
-
 
 static int commit_fragment(wsrep::server_state& server_state,
                            wsrep::high_priority_service& high_priority_service,
@@ -176,11 +176,20 @@ static int commit_fragment(wsrep::server_state& server_state,
         {
             assert(err.size() == 0);
         }
-        streaming_applier->debug_crash(
-            "crash_apply_cb_before_fragment_removal");
-        ret = ret || streaming_applier->remove_fragments(ws_meta);
-        streaming_applier->debug_crash(
-            "crash_apply_cb_after_fragment_removal");
+
+        const wsrep::transaction& trx(streaming_applier->transaction());
+        // Fragment removal for XA is going to happen in after_commit
+        if (trx.state() != wsrep::transaction::s_prepared)
+        {
+            streaming_applier->debug_crash(
+                "crash_apply_cb_before_fragment_removal");
+
+            ret = ret || streaming_applier->remove_fragments(ws_meta);
+
+            streaming_applier->debug_crash(
+                "crash_apply_cb_after_fragment_removal");
+        }
+
         streaming_applier->debug_crash(
             "crash_commit_cb_before_last_fragment_commit");
         ret = ret || streaming_applier->commit(ws_handle, ws_meta);
@@ -206,12 +215,30 @@ static int rollback_fragment(wsrep::server_state& server_state,
                              const wsrep::ws_meta& ws_meta)
 {
     int ret(0);
+<<<<<<< HEAD
     // Adopts transaction state and starts a transaction for
     // high priority service
     int adopt_error;
     // bool remove_fragments(false);
     if ((adopt_error = high_priority_service.adopt_transaction(
              streaming_applier->transaction())))
+||||||| 58aa3e8
+    // Adopts transaction state and starts a transaction for
+    // high priority service
+    int adopt_error;
+    bool remove_fragments(false);
+    if ((adopt_error = high_priority_service.adopt_transaction(
+             streaming_applier->transaction())))
+=======
+    int adopt_error(0);
+    bool const remove_fragments(streaming_applier->transaction().
+                                streaming_context().fragments().size() > 0);
+    // If fragment removal is needed, adopt transaction state
+    // and start a transaction for it.
+    if (remove_fragments &&
+        (adopt_error = high_priority_service.adopt_transaction(
+          streaming_applier->transaction())))
+>>>>>>> cs/master
     {
         log_adopt_error(streaming_applier->transaction());
     }
@@ -224,10 +251,16 @@ static int rollback_fragment(wsrep::server_state& server_state,
             high_priority_service, *streaming_applier);
         // Streaming applier rolls back out of order. Fragment
         // removal grabs commit order below.
+<<<<<<< HEAD
 #if 0
         remove_fragments = streaming_applier->transaction().
                            streaming_context().fragments().size() > 0;
 #endif
+||||||| 58aa3e8
+        remove_fragments = streaming_applier->transaction().
+                           streaming_context().fragments().size() > 0;
+=======
+>>>>>>> cs/master
         ret = streaming_applier->rollback(wsrep::ws_handle(), wsrep::ws_meta());
         ret = ret || (streaming_applier->after_apply(), 0);
     }
@@ -362,7 +395,7 @@ static int apply_write_set(wsrep::server_state& server_state,
                              ws_meta,
                              data);
     }
-    else if (ws_meta.flags() == 0)
+    else if (ws_meta.flags() == 0 || wsrep::prepares_transaction(ws_meta.flags()))
     {
         wsrep::high_priority_service* sa(
             server_state.find_streaming_applier(
@@ -383,6 +416,7 @@ static int apply_write_set(wsrep::server_state& server_state,
         }
         else
         {
+            sa->next_fragment(ws_meta);
             ret = apply_fragment(server_state,
                                  high_priority_service,
                                  sa,
@@ -424,6 +458,7 @@ static int apply_write_set(wsrep::server_state& server_state,
             else
             {
                 // Commit fragment consumes sa
+                sa->next_fragment(ws_meta);
                 ret = commit_fragment(server_state,
                                       high_priority_service,
                                       sa,
@@ -439,7 +474,7 @@ static int apply_write_set(wsrep::server_state& server_state,
     }
     if (ret)
     {
-        wsrep::log_info() << "Failed to apply write set: " << ws_meta;
+        wsrep::log_error() << "Failed to apply write set: " << ws_meta;
     }
     return ret;
 }
@@ -464,13 +499,20 @@ static int apply_toi(wsrep::provider& provider,
     }
     else if (wsrep::starts_transaction(ws_meta.flags()))
     {
-        // NBO begin
-        throw wsrep::not_implemented_error();
+        provider.commit_order_enter(ws_handle, ws_meta);
+        wsrep::mutable_buffer err;
+        int const apply_err(high_priority_service.apply_nbo_begin(ws_meta, data, err));
+        int const vote_err(provider.commit_order_leave(ws_handle, ws_meta, err));
+        return resolve_return_error(err.size() > 0, vote_err, apply_err);
     }
     else if (wsrep::commits_transaction(ws_meta.flags()))
     {
-        // NBO end
-        throw wsrep::not_implemented_error();
+        // NBO end event is ignored here, both local and applied
+        // have NBO end handled via local TOI calls.
+        provider.commit_order_enter(ws_handle, ws_meta);
+        wsrep::mutable_buffer err;
+        provider.commit_order_leave(ws_handle, ws_meta, err);
+        return 0;
     }
     else
     {
@@ -483,15 +525,17 @@ static int apply_toi(wsrep::provider& provider,
 //                            Server State                                  //
 //////////////////////////////////////////////////////////////////////////////
 
-int wsrep::server_state::load_provider(const std::string& provider_spec,
-                                       const std::string& provider_options)
+int wsrep::server_state::load_provider(
+    const std::string& provider_spec, const std::string& provider_options,
+    const wsrep::provider::services& services)
 {
     wsrep::log_info() << "Loading provider " << provider_spec
                       << " initial position: " << initial_position_;
 
     provider_ = wsrep::provider::make_provider(*this,
                                                provider_spec,
-                                               provider_options);
+                                               provider_options,
+                                               services);
     return (provider_ ? 0 : 1);
 }
 
@@ -516,6 +560,15 @@ int wsrep::server_state::disconnect()
 {
     {
         wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+        // In case of failure situations which are caused by provider
+        // being shut down some failing operation may also try to shut
+        // down the replication. Check the state here and
+        // return success if the provider disconnect is already in progress
+        // or has completed.
+        if (state(lock) == s_disconnecting || state(lock) == s_disconnected)
+        {
+            return 0;
+        }
         state(lock, s_disconnecting);
         interrupt_state_waiters(lock);
     }
@@ -583,7 +636,7 @@ wsrep::seqno wsrep::server_state::desync_and_pause()
         // Desync may give transient error if the provider cannot
         // communicate with the rest of the cluster. However, this
         // error can be tolerated because if the provider can be
-        // paused succesfully below.
+        // paused successfully below.
         WSREP_LOG_DEBUG(wsrep::log::debug_log_level(),
                         wsrep::log::debug_level_server_state,
                         "Failed to desync server before pause");
@@ -667,10 +720,12 @@ void wsrep::server_state::sst_sent(const wsrep::gtid& gtid, int error)
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     state(lock, s_joined);
     lock.unlock();
-    if (provider().sst_sent(gtid, error))
+    enum provider::status const retval(provider().sst_sent(gtid, error));
+    if (retval != provider::success)
     {
-        server_service_.log_message(wsrep::log::warning,
-                                    "Provider sst_sent() returned an error");
+        std::string msg("wsrep::sst_sent() returned an error: ");
+        msg += wsrep::provider::to_string(retval);
+        server_service_.log_message(wsrep::log::warning, msg.c_str());
     }
 }
 
@@ -740,7 +795,7 @@ void wsrep::server_state::sst_received(wsrep::client_service& cs,
                  * logged view. */
                 std::ostringstream msg;
                 msg << "SST script passed bogus GTID: " << gtid
-                    << ". Preceeding view GTID: " << v.state_id();
+                    << ". Preceding view GTID: " << v.state_id();
                 throw wsrep::runtime_error(msg.str());
             }
 
@@ -765,6 +820,7 @@ void wsrep::server_state::sst_received(wsrep::client_service& cs,
         lock.unlock();
     }
 
+<<<<<<< HEAD
     if (awaiting_callback) {
       /* Mark that callback has been delivered to galera.
          With error case above, it is possible that the it will not be delivered
@@ -773,8 +829,16 @@ void wsrep::server_state::sst_received(wsrep::client_service& cs,
     }
 
     if (provider().sst_received(gtid, error))
+||||||| 58aa3e8
+    if (provider().sst_received(gtid, error))
+=======
+    enum provider::status const retval(provider().sst_received(gtid, error));
+    if (retval != provider::success)
+>>>>>>> cs/master
     {
-        throw wsrep::runtime_error("wsrep::sst_received() failed");
+        std::string msg("wsrep::sst_received() failed: ");
+        msg += wsrep::provider::to_string(retval);
+        throw wsrep::runtime_error(msg);
     }
 }
 
@@ -822,8 +886,15 @@ wsrep::server_state::set_encryption_key(std::vector<unsigned char>& key)
     encryption_key_ = key;
     if (state_ != s_disconnected)
     {
-        return provider_->enc_set_key(wsrep::const_buffer(encryption_key_.data(),
-                                                          encryption_key_.size()));
+        wsrep::const_buffer const key(encryption_key_.data(),
+                                      encryption_key_.size());
+        enum provider::status const retval(provider_->enc_set_key(key));
+        if (retval != provider::success)
+        {
+            wsrep::log_error() << "Failed to set encryption key: "
+                               << provider::to_string(retval);
+            return 1;
+        }
     }
     return 0;
 }
@@ -849,8 +920,8 @@ void wsrep::server_state::on_connect(const wsrep::view& view)
         throw wsrep::runtime_error(os.str());
     }
 
-    if (id_.is_undefined() == false &&
-        id_ != view.members()[view.own_index()].id())
+    const size_t own_index(static_cast<size_t>(view.own_index()));
+    if (id_.is_undefined() == false && id_ != view.members()[own_index].id())
     {
         std::ostringstream os;
         os << "Connection in connected state.\n"
@@ -865,7 +936,7 @@ void wsrep::server_state::on_connect(const wsrep::view& view)
     }
     else
     {
-        id_ = view.members()[view.own_index()].id();
+        id_ = view.members()[own_index].id();
     }
 
     wsrep::log_info() << "Server "
@@ -1269,6 +1340,23 @@ wsrep::high_priority_service* wsrep::server_state::find_streaming_applier(
     return (i == streaming_appliers_.end() ? 0 : i->second);
 }
 
+wsrep::high_priority_service* wsrep::server_state::find_streaming_applier(
+    const wsrep::xid& xid) const
+{
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    streaming_appliers_map::const_iterator i(streaming_appliers_.begin());
+    while (i != streaming_appliers_.end())
+    {
+        wsrep::high_priority_service* sa(i->second);
+        if (sa->transaction().xid() == xid)
+        {
+            return sa;
+        }
+        i++;
+    }
+    return NULL;
+}
+
 //////////////////////////////////////////////////////////////////////////////
 //                              Private                                     //
 //////////////////////////////////////////////////////////////////////////////
@@ -1393,6 +1481,20 @@ void wsrep::server_state::recover_streaming_appliers_if_not_recovered(
     streaming_appliers_recovered_ = true;
 }
 
+class transaction_state_cmp
+{
+public:
+    transaction_state_cmp(const enum wsrep::transaction::state s)
+        : state_(s) { }
+    bool operator()(const std::pair<wsrep::client_id,
+                    wsrep::client_state*>& vt) const
+    {
+        return vt.second->transaction().state() == state_;
+    }
+private:
+    enum wsrep::transaction::state state_;
+};
+
 void wsrep::server_state::close_orphaned_sr_transactions(
     wsrep::unique_lock<wsrep::mutex>& lock,
     wsrep::high_priority_service& high_priority_service)
@@ -1413,9 +1515,13 @@ void wsrep::server_state::close_orphaned_sr_transactions(
 
     if (current_view_.own_index() == -1 || equal_consecutive_views)
     {
-        while (streaming_clients_.empty() == false)
+        streaming_clients_map::iterator i;
+        transaction_state_cmp prepared_state_cmp(wsrep::transaction::s_prepared);
+        while ((i = std::find_if_not(streaming_clients_.begin(),
+                                     streaming_clients_.end(),
+                                     prepared_state_cmp))
+               != streaming_clients_.end())
         {
-            streaming_clients_map::iterator i(streaming_clients_.begin());
             wsrep::client_id client_id(i->first);
             wsrep::transaction_id transaction_id(i->second->transaction().id());
             // It is safe to unlock the server state temporarily here.
@@ -1443,13 +1549,19 @@ void wsrep::server_state::close_orphaned_sr_transactions(
     streaming_appliers_map::iterator i(streaming_appliers_.begin());
     while (i != streaming_appliers_.end())
     {
-        // rollback SR on equal consecutive primary views or if its
-        // originator is not in the current view
-        if (equal_consecutive_views ||
-            (std::find_if(current_view_.members().begin(),
-                          current_view_.members().end(),
-                          server_id_cmp(i->first.first)) ==
-             current_view_.members().end()))
+        wsrep::high_priority_service* streaming_applier(i->second);
+
+        // Rollback SR on equal consecutive primary views or if its
+        // originator is not in the current view.
+        // Transactions in prepared state must be committed or
+        // rolled back explicitly, those are never rolled back here.
+        if ((streaming_applier->transaction().state() !=
+             wsrep::transaction::s_prepared) &&
+            (equal_consecutive_views ||
+             (std::find_if(current_view_.members().begin(),
+                           current_view_.members().end(),
+                           server_id_cmp(i->first.first)) ==
+              current_view_.members().end())))
         {
             WSREP_LOG_DEBUG(wsrep::log::debug_log_level(),
                             wsrep::log::debug_level_server_state,
@@ -1458,7 +1570,6 @@ void wsrep::server_state::close_orphaned_sr_transactions(
                             << ", " << i->first.second);
             wsrep::id server_id(i->first.first);
             wsrep::transaction_id transaction_id(i->first.second);
-            wsrep::high_priority_service* streaming_applier(i->second);
             int adopt_error;
             if ((adopt_error = high_priority_service.adopt_transaction(
                      streaming_applier->transaction())))

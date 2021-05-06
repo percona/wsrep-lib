@@ -27,6 +27,10 @@
 
 namespace wsrep
 {
+    /** @class key
+     *
+     * Certification key type.
+     */
     class key
     {
     public:
@@ -44,6 +48,14 @@ namespace wsrep
             , key_parts_len_()
         { }
 
+        /**
+         * Append key part to key.
+         *
+         * @param ptr Pointer to key part data. The caller is supposed to take
+         *            care that the pointer remains valid over the lifetime
+         *            if the key object.
+         * @param len Length of the key part data.
+         */
         void append_key_part(const void* ptr, size_t len)
         {
             if (key_parts_len_ == 3)
@@ -77,6 +89,7 @@ namespace wsrep
 
     typedef std::vector<wsrep::key> key_array;
 
+    std::ostream& operator<<(std::ostream&, enum wsrep::key::type);
     std::ostream& operator<<(std::ostream&, const wsrep::key&);
 }
 

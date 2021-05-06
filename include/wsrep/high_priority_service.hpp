@@ -24,6 +24,7 @@
 #ifndef WSREP_HIGH_PRIORITY_SERVICE_HPP
 #define WSREP_HIGH_PRIORITY_SERVICE_HPP
 
+#include "xid.hpp"
 #include "server_state.hpp"
 
 namespace wsrep
@@ -50,6 +51,11 @@ namespace wsrep
          */
         virtual int start_transaction(const wsrep::ws_handle&,
                                       const wsrep::ws_meta&) = 0;
+
+        /**
+         * Start the next fragment of current transaction
+         */
+        virtual int next_fragment(const wsrep::ws_meta&) = 0;
 
         /**
          * Return transaction object associated to high priority
@@ -91,7 +97,8 @@ namespace wsrep
         virtual int append_fragment_and_commit(
             const wsrep::ws_handle& ws_handle,
             const wsrep::ws_meta& ws_meta,
-            const wsrep::const_buffer& data) = 0;
+            const wsrep::const_buffer& data,
+            const wsrep::xid& xid) = 0;
 
         /**
          * Remove fragments belonging to streaming transaction.
@@ -153,6 +160,27 @@ namespace wsrep
         virtual int apply_toi(const wsrep::ws_meta& ws_meta,
                               const wsrep::const_buffer& ws,
                               wsrep::mutable_buffer& err) = 0;
+
+        /**
+         * Apply NBO begin event.
+         *
+         * The responsibility of the implementation is to start
+         * an asynchronous process which will complete the operation.
+         * The call is done under total order isolation, and the
+         * isolation is released by the caller after the method
+         * returns. It is a responsibility of the asynchronous process
+         * to complete the second phase of NBO.
+         *
+         * @param ws_meta Write set meta data.
+         * @param data Buffer containing the command to execute.
+         * @params err Buffer to store error data
+         *
+         * @return Zero in case of success, non-zero if the asynchronous
+         *         process could not be started.
+         */
+        virtual int apply_nbo_begin(const wsrep::ws_meta& ws_meta,
+                                    const wsrep::const_buffer& data,
+                                    wsrep::mutable_buffer& err) = 0;
 
         /**
          * Actions to take after applying a write set was completed.

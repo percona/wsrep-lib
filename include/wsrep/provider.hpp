@@ -25,6 +25,7 @@
 #include "buffer.hpp"
 #include "client_id.hpp"
 #include "transaction_id.hpp"
+#include "compiler.hpp"
 
 #include "wsrep_api.h"
 
@@ -35,10 +36,19 @@
 #include <vector>
 #include <ostream>
 
+/**
+ * Empty provider magic. If none provider is passed to make_provider(),
+ * a dummy provider is loaded.
+ */
+#define WSREP_LIB_PROVIDER_NONE "none"
+
 namespace wsrep
 {
     class server_state;
     class high_priority_service;
+    class thread_service;
+    class tls_service;
+
     class stid
     {
     public:
@@ -124,7 +134,12 @@ namespace wsrep
             , depends_on_(depends_on)
             , flags_(flags)
         { }
-
+        ws_meta(const wsrep::stid& stid)
+            : gtid_()
+            , stid_(stid)
+            , depends_on_()
+            , flags_()
+        { }
         const wsrep::gtid& gtid() const { return gtid_; }
         const wsrep::id& group_id() const
         {
@@ -173,22 +188,14 @@ namespace wsrep
         int flags_;
     };
 
-    static inline
-    std::ostream& operator<<(std::ostream& os, const wsrep::ws_meta& ws_meta)
-    {
-        os << "gtid: " << ws_meta.gtid()
-           << " server_id: " << ws_meta.server_id()
-           << " client_id: " << ws_meta.client_id()
-           << " trx_id: " << ws_meta.transaction_id()
-           << " flags: " << ws_meta.flags();
-        return os;
-    }
+    std::string flags_to_string(int flags);
+
+    std::ostream& operator<<(std::ostream& os, const wsrep::ws_meta& ws_meta);
 
     // Abstract interface for provider implementations
     class provider
     {
     public:
-
         class status_variable
         {
         public:
@@ -225,7 +232,8 @@ namespace wsrep
             error_size_exceeded,
             /** Connectivity to cluster lost */
             error_connection_failed,
-            /** Internal provider failure, provider must be reinitialized */
+            /** Internal provider failure or provider was closed,
+                provider must be reinitialized */
             error_provider_failed,
             /** Fatal error, server must abort */
             error_fatal,
@@ -236,6 +244,8 @@ namespace wsrep
             /** Unknown error code from the provider */
             error_unknown
         };
+
+        static std::string to_string(enum status);
 
         struct flag
         {
@@ -372,9 +382,9 @@ namespace wsrep
          * Return last committed GTID.
          */
         virtual wsrep::gtid last_committed_gtid() const = 0;
-        virtual int sst_sent(const wsrep::gtid&, int) = 0;
-        virtual int sst_received(const wsrep::gtid&, int) = 0;
-        virtual int enc_set_key(const wsrep::const_buffer& key) = 0;
+        virtual enum status sst_sent(const wsrep::gtid&, int) = 0;
+        virtual enum status sst_received(const wsrep::gtid&, int) = 0;
+        virtual enum status enc_set_key(const wsrep::const_buffer& key) = 0;
         virtual std::vector<status_variable> status() const = 0;
         virtual void reset_status() = 0;
 
@@ -407,25 +417,44 @@ namespace wsrep
         virtual void* native() const = 0;
 
         /**
+<<<<<<< HEAD
          * Fetch cluster node information to populate PXC cluster view table.
          */
         virtual void fetch_pfs_info(wsrep_node_info_t *nodes, uint32_t size) = 0;
 
         /**
+||||||| 58aa3e8
+=======
+         * Services argument passed to make_provider. This struct contains
+         * optional services which are passed to the provider.
+         */
+        struct services
+        {
+            wsrep::thread_service* thread_service;
+            wsrep::tls_service* tls_service;
+            services()
+                : thread_service()
+                , tls_service()
+            {
+            }
+        };
+        /**
+>>>>>>> cs/master
          * Create a new provider.
          *
          * @param provider_spec Provider specification
          * @param provider_options Initial options to provider
+         * @param thread_service Optional thread service implementation.
          */
-        static provider* make_provider(
-            wsrep::server_state&,
-            const std::string& provider_spec,
-            const std::string& provider_options);
+        static provider* make_provider(wsrep::server_state&,
+                                       const std::string& provider_spec,
+                                       const std::string& provider_options,
+                                       const wsrep::provider::services& services
+                                       = wsrep::provider::services());
+
     protected:
         wsrep::server_state& server_state_;
     };
-
-    std::string flags_to_string(int flags);
 
     static inline bool starts_transaction(int flags)
     {

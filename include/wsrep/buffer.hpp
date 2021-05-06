@@ -66,6 +66,10 @@ namespace wsrep
             : buffer_()
         { }
 
+        mutable_buffer(const mutable_buffer& b)
+            : buffer_(b.buffer_)
+        { }
+
         void resize(size_t s) { buffer_.resize(s); }
 
         void clear()
@@ -85,13 +89,44 @@ namespace wsrep
         }
 
         size_t size() const { return buffer_.size(); }
+<<<<<<< HEAD
         char* data() { return buffer_.data(); }
         const char* data() const { return buffer_.data(); }
+||||||| 58aa3e8
+        char* data() { return &buffer_[0]; }
+        const char* data() const { return &buffer_[0]; }
+=======
+
+        /**
+         * Return pointer to underlying data array. The returned pointer
+         * may or may not be null in case of empty buffer, it is up to
+         * user to check the size of the array before dereferencing the
+         * pointer.
+         *
+         * @return Pointer to underlying data array.
+         */
+        char* data() { return buffer_.data(); }
+
+        /**
+         * Return const pointer to underlying data array. The returned pointer
+         * may or may not be null in case of empty buffer, it is up to
+         * user to check the size of the array before dereferencing the
+         * pointer.
+         *
+         * @return Const pointer to underlying data array.
+         */
+        const char* data() const { return buffer_.data(); }
+>>>>>>> cs/master
 
         mutable_buffer& operator= (const mutable_buffer& other)
         {
             buffer_ = other.buffer_;
             return *this;
+        }
+
+        bool operator==(const mutable_buffer& other) const
+        {
+          return buffer_ == other.buffer_;
         }
     private:
         std::vector<char> buffer_;

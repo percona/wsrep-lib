@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2019 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -17,15 +17,26 @@
  * along with wsrep-lib.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef WSREP_APPLIER_HPP
-#define WSREP_APPLIER_HPP
+/** @file chrono.hpp
+ *
+ * Type definitions to work around GCC 4.4 incompatibilities with
+ * C++11 chrono.
+ */
+
+#ifndef WSREP_CHRONO_HPP
+#define WSREP_CHRONO_HPP
+
+#include <chrono>
 
 namespace wsrep
 {
-    class applier
-    {
+    /* wsrep::clock - clock type compatible with std::chrono::steady_clock. */
+#if defined(__GNUG__) && (__GNUC__ == 4 && __GNUC_MINOR__ == 4)
+    typedef std::chrono::monotonic_clock clock;
+#else
+    using clock = std::chrono::steady_clock;
+#endif // defined(__GNUG__) && (__GNUC__ == 4 && __GNUC_MINOR__ == 4)
 
-    };
 }
 
-#endif // WSREP_APPLIER_HPP
+#endif // WSREP_CHRONO_HPP
