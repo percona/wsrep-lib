@@ -36,7 +36,7 @@ namespace wsrep
         wsrep_provider_v26(wsrep::server_state&, const std::string&,
                            const std::string&,
                            const wsrep::provider::services& services);
-        ~wsrep_provider_v26();
+        ~wsrep_provider_v26() WSREP_OVERRIDE;
         enum wsrep::provider::status
         connect(const std::string&, const std::string&, const std::string&,
                     bool) WSREP_OVERRIDE;
@@ -87,40 +87,6 @@ namespace wsrep
                                                const wsrep::mutable_buffer&)
             WSREP_OVERRIDE;
         std::pair<wsrep::gtid, enum wsrep::provider::status>
-<<<<<<< HEAD
-        causal_read(int) const;
-        enum wsrep::provider::status wait_for_gtid(const wsrep::gtid&, int) const;
-        wsrep::gtid last_committed_gtid() const;
-        int sst_sent(const wsrep::gtid&,int);
-        int sst_received(const wsrep::gtid& gtid, int);
-        int enc_set_key(const wsrep::const_buffer& key);
-        std::vector<status_variable> status() const;
-        void reset_status();
-        std::string options() const;
-        enum wsrep::provider::status options(const std::string&);
-        std::string name() const;
-        std::string version() const;
-        std::string vendor() const;
-        void* native() const;
-
-        void fetch_pfs_info(wsrep_node_info_t *nodes, uint32_t size);
-
-||||||| 58aa3e8
-        causal_read(int) const;
-        enum wsrep::provider::status wait_for_gtid(const wsrep::gtid&, int) const;
-        wsrep::gtid last_committed_gtid() const;
-        int sst_sent(const wsrep::gtid&,int);
-        int sst_received(const wsrep::gtid& gtid, int);
-        int enc_set_key(const wsrep::const_buffer& key);
-        std::vector<status_variable> status() const;
-        void reset_status();
-        std::string options() const;
-        enum wsrep::provider::status options(const std::string&);
-        std::string name() const;
-        std::string version() const;
-        std::string vendor() const;
-        void* native() const;
-=======
         causal_read(int) const WSREP_OVERRIDE;
         enum wsrep::provider::status wait_for_gtid(const wsrep::gtid&, int)
             const WSREP_OVERRIDE;
@@ -139,7 +105,8 @@ namespace wsrep
         std::string version() const WSREP_OVERRIDE;
         std::string vendor() const WSREP_OVERRIDE;
         void* native() const WSREP_OVERRIDE;
->>>>>>> cs/master
+
+        void fetch_pfs_info(wsrep_node_info_t *nodes, uint32_t size) WSREP_OVERRIDE;
     private:
         wsrep_provider_v26(const wsrep_provider_v26&);
         wsrep_provider_v26& operator=(const wsrep_provider_v26);

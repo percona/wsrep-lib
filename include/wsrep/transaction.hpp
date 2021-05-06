@@ -203,16 +203,6 @@ namespace wsrep
 
         void clone_for_replay(const wsrep::transaction& other);
 
-<<<<<<< HEAD
-        void deattach_after_replay();
-
-        void after_replay(const wsrep::transaction& other);
-
-||||||| 58aa3e8
-        void after_replay(const wsrep::transaction& other);
-
-=======
->>>>>>> cs/master
         bool bf_aborted() const
         {
             return (bf_abort_client_state_ != 0);

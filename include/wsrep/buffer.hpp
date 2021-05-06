@@ -89,13 +89,6 @@ namespace wsrep
         }
 
         size_t size() const { return buffer_.size(); }
-<<<<<<< HEAD
-        char* data() { return buffer_.data(); }
-        const char* data() const { return buffer_.data(); }
-||||||| 58aa3e8
-        char* data() { return &buffer_[0]; }
-        const char* data() const { return &buffer_[0]; }
-=======
 
         /**
          * Return pointer to underlying data array. The returned pointer
@@ -116,7 +109,6 @@ namespace wsrep
          * @return Const pointer to underlying data array.
          */
         const char* data() const { return buffer_.data(); }
->>>>>>> cs/master
 
         mutable_buffer& operator= (const mutable_buffer& other)
         {

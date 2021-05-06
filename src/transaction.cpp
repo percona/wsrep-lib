@@ -300,24 +300,14 @@ int wsrep::transaction::before_prepare(
                     wsrep::provider::error_not_allowed);
                 ret = 1;
             }
-<<<<<<< HEAD
-            else
-            {   
-                lock.lock();
-                ret = client_service_.remove_fragments(lock);
-                lock.unlock();
-||||||| 58aa3e8
-            else
-            {
-                ret = client_service_.remove_fragments();
-=======
             else if (!is_xa())
-            {
+            {   
                 // Note: we can't remove fragments here for XA,
                 // the transaction has already issued XA END and
                 // is in IDLE state, no more changes allowed!
-                ret = client_service_.remove_fragments();
->>>>>>> cs/master
+                lock.lock();
+                ret = client_service_.remove_fragments(lock);
+                lock.unlock();
                 if (ret)
                 {
                     client_state_.override_error(wsrep::e_deadlock_error);
@@ -1081,23 +1071,6 @@ void wsrep::transaction::clone_for_replay(const wsrep::transaction& other)
     state_ = s_replaying;
 }
 
-<<<<<<< HEAD
-void wsrep::transaction::deattach_after_replay()
-{
-    // state = s_replaying when replaying transaction fails with
-    // local certification failure then de-attach such transaction
-    // before copying the state of it to the main transaction.
-    assert(state_ == s_replaying);
-    wsrep::unique_lock<wsrep::mutex> lock(client_state_.mutex_);
-    state(lock, s_aborted);
-    id_ = wsrep::transaction_id::undefined();
-    ws_meta_ = wsrep::ws_meta();
-}
-
-void wsrep::transaction::after_replay(const wsrep::transaction& other)
-||||||| 58aa3e8
-void wsrep::transaction::after_replay(const wsrep::transaction& other)
-=======
 void wsrep::transaction::assign_xid(const wsrep::xid& xid)
 {
     assert(active());
@@ -1208,7 +1181,6 @@ void wsrep::transaction::xa_detach()
 }
 
 int wsrep::transaction::xa_replay(wsrep::unique_lock<wsrep::mutex>& lock)
->>>>>>> cs/master
 {
     debug_log_state("xa_replay enter");
     assert(lock.owns_lock());
@@ -1960,7 +1932,7 @@ int wsrep::transaction::replay(wsrep::unique_lock<wsrep::mutex>& lock)
             wsrep::e_deadlock_error);
         if (is_streaming())
         {
-            client_service_.remove_fragments();
+            client_service_.remove_fragments(lock);
             clear_fragments();
         }
         state(lock, s_aborted);
