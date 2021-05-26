@@ -101,9 +101,10 @@ namespace wsrep
          * Fragment removal will be committed once the current transaction
          * commits.
          *
+         * @param lock Lock object grabbed by the client_state
          * @return Zero in case of success, non-zero on failure.
          */
-        virtual int remove_fragments() = 0;
+        virtual int remove_fragments(wsrep::unique_lock<wsrep::mutex> &lock) = 0;
 
         //
         // Rollback

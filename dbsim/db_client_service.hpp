@@ -55,7 +55,7 @@ namespace db
         {
             return 0;
         }
-        int remove_fragments() override { return 0; }
+        int remove_fragments(wsrep::unique_lock<wsrep::mutex>&) override { return 0; }
         int bf_rollback() override;
         void will_replay() override { }
         void wait_for_replayers(wsrep::unique_lock<wsrep::mutex>&) override { }

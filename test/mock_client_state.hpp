@@ -85,7 +85,7 @@ namespace wsrep
 
         void emergency_shutdown() WSREP_OVERRIDE { ++aborts_; }
 
-        int remove_fragments() WSREP_OVERRIDE
+        int remove_fragments(wsrep::unique_lock<wsrep::mutex>&) WSREP_OVERRIDE
         {
             if (bf_abort_during_fragment_removal_)
             {
