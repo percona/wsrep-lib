@@ -290,8 +290,10 @@ int wsrep::transaction::before_prepare(
                 ret = 1;
             }
             else
-            {
-                ret = client_service_.remove_fragments();
+            {   
+                lock.lock();
+                ret = client_service_.remove_fragments(lock);
+                lock.unlock();
                 if (ret)
                 {
                     client_state_.override_error(wsrep::e_deadlock_error);
