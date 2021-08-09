@@ -35,6 +35,11 @@ int db::high_priority_service::start_transaction(
     return client_.client_state().start_transaction(ws_handle, ws_meta);
 }
 
+int db::high_priority_service::next_fragment(const wsrep::ws_meta& ws_meta)
+{
+    return client_.client_state().next_fragment(ws_meta);
+}
+
 const wsrep::transaction& db::high_priority_service::transaction() const
 {
     return client_.client_state().transaction();
@@ -56,6 +61,14 @@ int db::high_priority_service::apply_write_set(
 }
 
 int db::high_priority_service::apply_toi(
+    const wsrep::ws_meta&,
+    const wsrep::const_buffer&,
+    wsrep::mutable_buffer&)
+{
+    throw wsrep::not_implemented_error();
+}
+
+int db::high_priority_service::apply_nbo_begin(
     const wsrep::ws_meta&,
     const wsrep::const_buffer&,
     wsrep::mutable_buffer&)

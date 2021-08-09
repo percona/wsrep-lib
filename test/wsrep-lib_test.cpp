@@ -23,9 +23,11 @@
  *
  * Commandline arguments:
  *
- * --wsrep-log-file=<file> Write log from wsrep-lib logging facility
- *                         into <file>. If <file> is left empty, the
- *                         log is written into stdout.
+ * --wsrep-log-file=<file>   Write log from wsrep-lib logging facility
+ *                           into <file>. If <file> is left empty, the
+ *                           log is written into stdout.
+ * --wsrep-debug-level=<int> Set debug level
+ *                           See wsrep::log::debug_level for valid values
  */
 
 #include "wsrep/logger.hpp"
@@ -37,11 +39,15 @@
 // Log file to write messages logged via wsrep-lib logging facility.
 static std::string log_file_name("wsrep-lib_test.log");
 static std::ofstream log_file;
+// Debug log level for wsrep-lib logging
+static std::string debug_log_level;
+
 
 static void log_fn(wsrep::log::level level,
+                   const char* pfx,
                    const char* msg)
 {
-    log_file << wsrep::log::to_c_string(level) << ": " << msg << std::endl;
+    log_file << wsrep::log::to_c_string(level) << " " << pfx << msg << std::endl;
 }
 
 static bool parse_arg(const std::string& arg)
@@ -58,6 +64,10 @@ static bool parse_arg(const std::string& arg)
     if (parm == "--wsrep-log-file")
     {
         log_file_name = val;
+    }
+    else if (parm == "--wsrep-debug-level")
+    {
+        debug_log_level = val;
     }
     else
     {
@@ -91,6 +101,14 @@ static bool setup_env(int argc, char* argv[])
                   << std::endl;
         wsrep::log::logger_fn(log_fn);
     }
+
+    if (debug_log_level.size())
+    {
+        int level = std::stoi(debug_log_level);
+        std::cout << "Setting debug level '" << level << "'" << std::endl;
+        wsrep::log::debug_log_level(level);
+    }
+
     return true;
 }
 

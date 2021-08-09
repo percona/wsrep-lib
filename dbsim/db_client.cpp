@@ -34,8 +34,13 @@ db::client::client(db::server& server,
     , client_state_(mutex_, cond_, server_state_, client_service_, client_id, mode)
     , client_service_(*this)
     , se_trx_(server.storage_engine())
+    , data_()
+    , random_device_()
+    , random_engine_(random_device_())
     , stats_()
-{ }
+{
+    data_.resize(params.max_data_size);
+}
 
 void db::client::start()
 {
@@ -88,6 +93,13 @@ int db::client::client_command(F f)
 
 void db::client::run_one_transaction()
 {
+    if (params_.sync_wait)
+    {
+        if (client_state_.sync_wait(5))
+        {
+            throw wsrep::runtime_error("Sync wait failed");
+        }
+    }
     client_state_.reset_error();
     int err = client_command(
         [&]()
@@ -109,18 +121,24 @@ void db::client::run_one_transaction()
             // wsrep::log_debug() << "Generate write set";
             assert(transaction.active());
             assert(err == 0);
-            int data(std::rand() % params_.n_rows);
-            std::ostringstream os;
-            os << data;
+            std::uniform_int_distribution<size_t> uniform_dist(0, params_.n_rows);
+            const size_t randkey(uniform_dist(random_engine_));
+            ::memcpy(data_.data(), &randkey,
+                     std::min(sizeof(randkey), data_.size()));
             wsrep::key key(wsrep::key::exclusive);
             key.append_key_part("dbms", 4);
             unsigned long long client_key(client_state_.id().get());
             key.append_key_part(&client_key, sizeof(client_key));
-            key.append_key_part(&data, sizeof(data));
+            key.append_key_part(&randkey, sizeof(randkey));
             err = client_state_.append_key(key);
+            size_t bytes_to_append(data_.size());
+            if (params_.random_data_size)
+            {
+                bytes_to_append = std::uniform_int_distribution<size_t>(
+                    1, data_.size())(random_engine_);
+            }
             err = err || client_state_.append_data(
-                wsrep::const_buffer(os.str().c_str(),
-                                    os.str().size()));
+                wsrep::const_buffer(data_.data(), bytes_to_append));
             return err;
         });
 
@@ -172,6 +190,6 @@ void db::client::report_progress(size_t i) const
     {
         wsrep::log_info() << "client: " << client_state_.id().get()
                           << " transactions: " << i
-                          << " " << 100*double(i)/params_.n_transactions << "%";
+                          << " " << 100*double(i)/double(params_.n_transactions) << "%";
     }
 }

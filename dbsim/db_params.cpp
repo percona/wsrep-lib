@@ -67,27 +67,53 @@ db::params db::parse_args(int argc, char** argv)
          "number of transactions run by a client")
         ("rows", po::value<size_t>(&params.n_rows),
          "number of rows per table")
+        ("max-data-size", po::value<size_t>(&params.max_data_size),
+         "maximum size of data payload (default 8)")
+        ("random-data-size", po::value<bool>(&params.random_data_size),
+         "randomized payload data size (default 0)")
         ("alg-freq", po::value<size_t>(&params.alg_freq),
          "ALG frequency")
+        ("sync-wait", po::value<bool>(&params.sync_wait),
+         "Turn on sync wait for each transaction")
         ("debug-log-level", po::value<int>(&params.debug_log_level),
          "debug logging level: 0 - none, 1 - verbose")
         ("fast-exit", po::value<int>(&params.fast_exit),
-         "exit from simulation without graceful shutdown");
+         "exit from simulation without graceful shutdown")
+        ("ti",
+         po::value<int>(&params.thread_instrumentation),
+         "use instrumentation for threads/mutexes/condition variables"
+         "(0 default disabled, 1 total counts, 2 per object)")
+        ("ti-cond-checks",
+         po::value<bool>(&params.cond_checks),
+         "Enable checks for correct condition variable use. "
+         " Effective only if thread-instrumentation is enabled")
+        ("tls-service",
+         po::value<int>(&params.tls_service),
+         "Configure TLS service stubs.\n0 default disabled\n1 enabled\n"
+         "2 enabled with short read/write and renegotiation simulation\n"
+         "3 enabled with error simulation.")
+        ;
     try
     {
         po::variables_map vm;
         po::store(po::parse_command_line(argc, argv, desc), vm);
-        po::notify(vm);
         if (vm.count("help"))
         {
             std::cerr << desc << "\n";
             exit(0);
         }
-
+        po::notify(vm);
         validate_params(params);
+    }
+    catch (const po::error& e)
+    {
+        std::cerr << "Error parsing arguments: " << e.what() << "\n";
+        std::cerr << desc << "\n";
+        exit(1);
     }
     catch (...)
     {
+        std::cerr << "Error parsing arguments\n";
         std::cerr << desc << "\n";
         exit(1);
     }

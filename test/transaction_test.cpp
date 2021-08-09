@@ -71,7 +71,7 @@ BOOST_FIXTURE_TEST_CASE_TEMPLATE(transaction_1pc, T,
     // Establish default read view
     BOOST_REQUIRE(0 == cc.assign_read_view(NULL));
 
-    // Verify that the commit can be succesfully executed in separate command
+    // Verify that the commit can be successfully executed in separate command
     BOOST_REQUIRE(cc.after_statement() == 0);
     cc.after_command_before_result();
     cc.after_command_after_result();
@@ -249,6 +249,46 @@ BOOST_FIXTURE_TEST_CASE_TEMPLATE(
     BOOST_REQUIRE(cc.current_error());
 }
 
+BOOST_FIXTURE_TEST_CASE_TEMPLATE(
+    transaction_1pc_bf_during_commit_order_enter, T,
+    replicating_fixtures, T)
+{
+    wsrep::mock_client& cc(T::cc);
+    const wsrep::transaction& tc(T::tc);
+    auto& sc(T::sc);
+
+    // Start a new transaction with ID 1
+    cc.start_transaction(wsrep::transaction_id(1));
+    BOOST_REQUIRE(tc.active());
+    BOOST_REQUIRE(tc.id() == wsrep::transaction_id(1));
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_executing);
+
+    sc.provider().commit_order_enter_result_ = wsrep::provider::error_bf_abort;
+
+    // Run before commit
+    BOOST_REQUIRE(cc.before_commit());
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_replay);
+    BOOST_REQUIRE(cc.will_replay_called() == true);
+    BOOST_REQUIRE(tc.certified() == true);
+    BOOST_REQUIRE(tc.ordered() == true);
+
+    sc.provider().commit_order_enter_result_ = wsrep::provider::success;
+
+    // Rollback sequence
+    BOOST_REQUIRE(cc.before_rollback() == 0);
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_replay);
+    BOOST_REQUIRE(cc.after_rollback() == 0);
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_replay);
+
+    // Replay from after_statement()
+    cc.after_statement();
+    BOOST_REQUIRE(cc.replays() > 0);
+    BOOST_REQUIRE(tc.active() == false);
+    BOOST_REQUIRE(tc.ordered() == false);
+    BOOST_REQUIRE(tc.certified() == false);
+    BOOST_REQUIRE(not cc.current_error());
+}
+
 //
 // Test a 1PC transaction for which prepare data fails
 //
@@ -341,6 +381,7 @@ BOOST_FIXTURE_TEST_CASE(
 
     BOOST_REQUIRE(cc.before_commit());
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_replay);
+    BOOST_REQUIRE(cc.will_replay_called() == true);
     BOOST_REQUIRE(cc.after_statement() == 0);
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_committed);
     BOOST_REQUIRE(cc.current_error() == wsrep::e_success);
@@ -361,6 +402,7 @@ BOOST_FIXTURE_TEST_CASE(
 
     BOOST_REQUIRE(cc.before_commit());
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_replay);
+    BOOST_REQUIRE(cc.will_replay_called() == true);
     BOOST_REQUIRE(cc.after_statement() );
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_aborted);
     BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
@@ -391,6 +433,7 @@ BOOST_FIXTURE_TEST_CASE_TEMPLATE(
     // Run before commit
     BOOST_REQUIRE(cc.before_commit());
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_replay);
+    BOOST_REQUIRE(cc.will_replay_called() == true);
     BOOST_REQUIRE(tc.certified() == false);
     BOOST_REQUIRE(tc.ordered() == true);
 
@@ -755,6 +798,7 @@ BOOST_FIXTURE_TEST_CASE_TEMPLATE(
     // Run before commit
     BOOST_REQUIRE(cc.before_commit());
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_replay);
+    BOOST_REQUIRE(cc.will_replay_called() == true);
     BOOST_REQUIRE(tc.certified() == true);
     BOOST_REQUIRE(tc.ordered() == true);
 
@@ -970,6 +1014,38 @@ BOOST_FIXTURE_TEST_CASE(
     BOOST_REQUIRE(tc.active() == false);
 }
 
+// Check the case where BF abort happens between client calls to
+// wait_rollback_complete_and_acquire_ownership()
+// and before before_command().
+BOOST_FIXTURE_TEST_CASE(
+    transaction_1pc_bf_abort_after_acquire_before_before_command_sync_rm,
+    replicating_client_fixture_sync_rm)
+{
+    cc.start_transaction(wsrep::transaction_id(1));
+    BOOST_REQUIRE(tc.active());
+    cc.after_statement();
+    BOOST_REQUIRE(cc.state() == wsrep::client_state::s_exec);
+    cc.after_command_before_result();
+    BOOST_REQUIRE(cc.state() == wsrep::client_state::s_result);
+    cc.after_command_after_result();
+    BOOST_REQUIRE(cc.state() == wsrep::client_state::s_idle);
+    cc.wait_rollback_complete_and_acquire_ownership();
+    BOOST_REQUIRE(cc.state() == wsrep::client_state::s_exec);
+    // As the control is now on client, the BF abort must just change
+    // the state to s_must_abort.
+    wsrep_test::bf_abort_unordered(cc);
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_abort);
+    BOOST_REQUIRE(tc.active());
+    BOOST_REQUIRE(cc.before_command() == 1);
+    BOOST_REQUIRE(tc.active() == false);
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+    cc.after_command_before_result();
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+    cc.after_command_after_result();
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_success);
+    BOOST_REQUIRE(tc.active() == false);
+}
+
 BOOST_FIXTURE_TEST_CASE(
     transaction_1pc_bf_abort_after_after_command_after_result_async_rm,
     replicating_client_fixture_async_rm)
@@ -995,9 +1071,181 @@ BOOST_FIXTURE_TEST_CASE(
     BOOST_REQUIRE(tc.active() == false);
 }
 
+//
+// Test before_command() with keep_command_error param
+// Failure free case is not affected by keep_command_error
+//
+BOOST_FIXTURE_TEST_CASE_TEMPLATE(transaction_keep_error, T,
+                                 replicating_fixtures, T)
+{
+    wsrep::mock_client& cc(T::cc);
+    const wsrep::transaction& tc(T::tc);
+
+    cc.start_transaction(wsrep::transaction_id(1));
+    BOOST_REQUIRE(tc.active());
+    cc.after_statement();
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+
+    bool keep_command_error(true);
+    BOOST_REQUIRE(cc.before_command(keep_command_error) == 0);
+    BOOST_REQUIRE(tc.active());
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+
+    keep_command_error = false;
+    BOOST_REQUIRE(cc.before_command(keep_command_error) == 0);
+    BOOST_REQUIRE(cc.before_statement() == 0);
+    BOOST_REQUIRE(cc.before_commit() == 0);
+    BOOST_REQUIRE(cc.ordered_commit() == 0);
+    BOOST_REQUIRE(cc.after_commit() == 0);
+    cc.after_statement();
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_success);
+}
+
+//
+// Test before_command() with keep_command_error param
+// BF abort while idle
+//
+BOOST_FIXTURE_TEST_CASE(transaction_keep_error_bf_idle_sync_rm,
+                        replicating_client_fixture_sync_rm)
+{
+    cc.start_transaction(wsrep::transaction_id(1));
+    cc.after_statement();
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+
+    BOOST_REQUIRE(cc.state() == wsrep::client_state::s_idle);
+    wsrep_test::bf_abort_unordered(cc);
+    cc.sync_rollback_complete();
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_aborted);
+
+    bool keep_command_error(true);
+    BOOST_REQUIRE(cc.before_command(keep_command_error) == 0);
+    BOOST_REQUIRE(tc.active());
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+
+    keep_command_error = false;
+    BOOST_REQUIRE(cc.before_command(keep_command_error) == 1);
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_success);
+}
+
+//
+// Test before_command() with keep_command_error param
+// BF abort after ownership is acquired and before before_command()
+//
+BOOST_FIXTURE_TEST_CASE_TEMPLATE(transaction_keep_error_bf_after_ownership, T,
+                                 replicating_fixtures, T)
+{
+    wsrep::mock_client& cc(T::cc);
+    const wsrep::transaction& tc(T::tc);
+
+    cc.start_transaction(wsrep::transaction_id(1));
+    cc.after_statement();
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+
+    cc.wait_rollback_complete_and_acquire_ownership();
+    wsrep_test::bf_abort_unordered(cc);
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_abort);
+
+    bool keep_command_error(true);
+    BOOST_REQUIRE(cc.before_command(keep_command_error) == 0);
+    BOOST_REQUIRE(tc.active());
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+
+    keep_command_error = false;
+    BOOST_REQUIRE(cc.before_command(keep_command_error) == 1);
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_success);
+}
+
+//
+// Test before_command() with keep_command_error param
+// BF abort right after before_command()
+//
+BOOST_FIXTURE_TEST_CASE_TEMPLATE(transaction_keep_error_bf_after_before_command, T,
+                                 replicating_fixtures, T)
+{
+    wsrep::mock_client& cc(T::cc);
+    const wsrep::transaction& tc(T::tc);
+
+    cc.start_transaction(wsrep::transaction_id(1));
+    cc.after_statement();
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+
+    bool keep_command_error(true);
+    BOOST_REQUIRE(cc.before_command(keep_command_error) == 0);
+    BOOST_REQUIRE(tc.active());
+
+    wsrep_test::bf_abort_unordered(cc);
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_abort);
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_aborted);
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+
+    keep_command_error = false;
+    BOOST_REQUIRE(cc.before_command(keep_command_error) == 1);
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_success);
+}
+
+//
+// Test before_command() with keep_command_error param
+// BF abort right after after_command_before_result()
+//
+BOOST_FIXTURE_TEST_CASE_TEMPLATE(transaction_keep_error_bf_after_after_command_before_result, T,
+                                 replicating_fixtures, T)
+{
+    wsrep::mock_client& cc(T::cc);
+    const wsrep::transaction& tc(T::tc);
+
+    cc.start_transaction(wsrep::transaction_id(1));
+    cc.after_statement();
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+
+    bool keep_command_error(true);
+    BOOST_REQUIRE(cc.before_command(keep_command_error) == 0);
+    BOOST_REQUIRE(tc.active());
+
+    cc.after_command_before_result();
+
+    wsrep_test::bf_abort_unordered(cc);
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_abort);
+
+    cc.after_command_after_result();
+    BOOST_REQUIRE(tc.state() == wsrep::transaction::s_aborted);
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+
+    keep_command_error = false;
+    BOOST_REQUIRE(cc.before_command(keep_command_error) == 1);
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_deadlock_error);
+    cc.after_command_before_result();
+    cc.after_command_after_result();
+    BOOST_REQUIRE(cc.current_error() == wsrep::e_success);
+}
+
 BOOST_FIXTURE_TEST_CASE(transaction_1pc_applying,
                         applying_client_fixture)
 {
+    start_transaction(wsrep::transaction_id(1),
+                      wsrep::seqno(1));
     BOOST_REQUIRE(cc.before_commit() == 0);
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_committing);
     BOOST_REQUIRE(cc.ordered_commit() == 0);
@@ -1110,6 +1358,8 @@ BOOST_FIXTURE_TEST_CASE(transaction_streaming_1pc_bf_abort_during_fragment_remov
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_aborted);
     BOOST_REQUIRE(cc.after_statement());
     BOOST_REQUIRE(tc.active() == false);
+    wsrep_test::terminate_streaming_applier(sc, sc.id(),
+                                            wsrep::transaction_id(1));
 }
 
 //
@@ -1152,6 +1402,9 @@ BOOST_FIXTURE_TEST_CASE(transaction_row_streaming_bf_abort_executing,
     BOOST_REQUIRE(cc.before_rollback() == 0);
     BOOST_REQUIRE(cc.after_rollback() == 0);
     BOOST_REQUIRE(cc.after_statement());
+    wsrep_test::terminate_streaming_applier(sc, sc.id(),
+                                            wsrep::transaction_id(1));
+
 }
 //
 // Test streaming certification failure during fragment replication
@@ -1229,6 +1482,7 @@ BOOST_FIXTURE_TEST_CASE(transaction_row_streaming_bf_abort_committing,
     BOOST_REQUIRE(cc.before_rollback() == 0);
     BOOST_REQUIRE(cc.after_rollback() == 0);
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_must_replay);
+    BOOST_REQUIRE(cc.will_replay_called() == true);
     BOOST_REQUIRE(cc.after_statement() == 0);
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_committed);
     BOOST_REQUIRE(sc.provider().fragments() == 2);
@@ -1410,8 +1664,4 @@ BOOST_AUTO_TEST_CASE(transaction_state_strings)
     BOOST_REQUIRE(
         wsrep::to_string(
             wsrep::transaction::s_replaying) == "replaying");
-    BOOST_REQUIRE(
-        wsrep::to_string(
-            static_cast<enum wsrep::transaction::state>(0xff)) == "unknown");
-
 }

@@ -28,6 +28,8 @@
 #include "lock.hpp"
 #include "sr_key_set.hpp"
 #include "buffer.hpp"
+#include "client_service.hpp"
+#include "xid.hpp"
 
 #include <cassert>
 #include <vector>
@@ -39,7 +41,6 @@ namespace wsrep
     class key;
     class const_buffer;
 
-
     class transaction
     {
     public:
@@ -47,6 +48,7 @@ namespace wsrep
         {
             s_executing,
             s_preparing,
+            s_prepared,
             s_certifying,
             s_committing,
             s_ordered_commit,
@@ -96,7 +98,7 @@ namespace wsrep
         { return (ws_meta_.seqno().is_undefined() == false); }
 
         /**
-         * Return true if any fragments have been succesfully certified
+         * Return true if any fragments have been successfully certified
          * for the transaction.
          */
         bool is_streaming() const
@@ -107,7 +109,7 @@ namespace wsrep
         /**
          * Return number of fragments certified for current statement.
          *
-         * This counts fragments which have been succesfully certified
+         * This counts fragments which have been successfully certified
          * since the construction of object or last after_statement()
          * call.
          *
@@ -126,6 +128,26 @@ namespace wsrep
             return sr_keys_.empty();
         }
 
+        bool is_xa() const
+        {
+            return !xid_.is_null();
+        }
+
+        void assign_xid(const wsrep::xid& xid);
+
+        const wsrep::xid& xid() const
+        {
+            return xid_;
+        }
+
+        int restore_to_prepared_state(const wsrep::xid& xid);
+
+        int commit_or_rollback_by_xid(const wsrep::xid& xid, bool commit);
+
+        void xa_detach();
+
+        int xa_replay(wsrep::unique_lock<wsrep::mutex>&);
+
         bool pa_unsafe() const { return pa_unsafe_; }
         void pa_unsafe(bool pa_unsafe) { pa_unsafe_ = pa_unsafe; }
 
@@ -136,6 +158,8 @@ namespace wsrep
 
         int start_transaction(const wsrep::ws_handle& ws_handle,
                               const wsrep::ws_meta& ws_meta);
+
+        int next_fragment(const wsrep::ws_meta& ws_meta);
 
         void adopt(const transaction& transaction);
         void fragment_applied(wsrep::seqno seqno);
@@ -179,10 +203,16 @@ namespace wsrep
 
         void clone_for_replay(const wsrep::transaction& other);
 
+<<<<<<< HEAD
         void deattach_after_replay();
 
         void after_replay(const wsrep::transaction& other);
 
+||||||| 58aa3e8
+        void after_replay(const wsrep::transaction& other);
+
+=======
+>>>>>>> cs/master
         bool bf_aborted() const
         {
             return (bf_abort_client_state_ != 0);
@@ -224,16 +254,17 @@ namespace wsrep
         // The call will adjust transaction state and set client_state
         // error status accordingly.
         bool abort_or_interrupt(wsrep::unique_lock<wsrep::mutex>&);
-        int streaming_step(wsrep::unique_lock<wsrep::mutex>&);
+        int streaming_step(wsrep::unique_lock<wsrep::mutex>&, bool force = false);
         int certify_fragment(wsrep::unique_lock<wsrep::mutex>&);
         int certify_commit(wsrep::unique_lock<wsrep::mutex>&);
         int append_sr_keys_for_commit();
         int release_commit_order(wsrep::unique_lock<wsrep::mutex>&);
         void streaming_rollback(wsrep::unique_lock<wsrep::mutex>&);
+        int replay(wsrep::unique_lock<wsrep::mutex>&);
         void clear_fragments();
         void cleanup();
         void debug_log_state(const char*) const;
-        void debug_log_key_append(const wsrep::key& key);
+        void debug_log_key_append(const wsrep::key& key) const;
 
         wsrep::server_service& server_service_;
         wsrep::client_service& client_service_;
@@ -257,6 +288,7 @@ namespace wsrep
         wsrep::streaming_context streaming_context_;
         wsrep::sr_key_set sr_keys_;
         wsrep::mutable_buffer apply_error_buf_;
+        wsrep::xid xid_;
     };
 
     static inline const char* to_c_string(enum wsrep::transaction::state state)
@@ -265,6 +297,7 @@ namespace wsrep
         {
         case wsrep::transaction::s_executing: return "executing";
         case wsrep::transaction::s_preparing: return "preparing";
+        case wsrep::transaction::s_prepared: return "prepared";
         case wsrep::transaction::s_certifying: return "certifying";
         case wsrep::transaction::s_committing: return "committing";
         case wsrep::transaction::s_ordered_commit: return "ordered_commit";
