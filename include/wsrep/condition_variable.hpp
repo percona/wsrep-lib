@@ -20,6 +20,7 @@
 #ifndef WSREP_CONDITION_VARIABLE_HPP
 #define WSREP_CONDITION_VARIABLE_HPP
 
+#include "compiler.hpp"
 #include "lock.hpp"
 
 #include <cstdlib>
@@ -52,28 +53,28 @@ namespace wsrep
             }
         }
 
-        ~default_condition_variable()
+        ~default_condition_variable() WSREP_OVERRIDE
         {
             if (pthread_cond_destroy(&cond_))
             {
                 ::abort();
             }
         }
-        void notify_one()
+        void notify_one() WSREP_OVERRIDE
         {
             (void)pthread_cond_signal(&cond_);
         }
 
-        void notify_all()
+        void notify_all() WSREP_OVERRIDE
         {
             (void)pthread_cond_broadcast(&cond_);
         }
 
-        void wait(wsrep::unique_lock<wsrep::mutex>& lock)
+        void wait(wsrep::unique_lock<wsrep::mutex>& lock) WSREP_OVERRIDE
         {
             if (pthread_cond_wait(
                     &cond_,
-                    reinterpret_cast<pthread_mutex_t*>(lock.mutex().native())))
+                    reinterpret_cast<pthread_mutex_t*>(lock.mutex()->native())))
             {
                 throw wsrep::runtime_error("Cond wait failed");
             }

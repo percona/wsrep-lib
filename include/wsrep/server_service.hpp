@@ -180,6 +180,18 @@ namespace wsrep
          */
         virtual wsrep::gtid get_position(
             wsrep::client_service& client_service) = 0;
+
+        /**
+         * Set the current replication position of the server
+         * storage.
+         *
+         * @param client_service Reference to client_service
+         * @param gtid Reference to position to be set
+         */
+        virtual void set_position(
+            wsrep::client_service& client_service,
+            const wsrep::gtid& gtid) = 0;
+
         /**
          * Log a state change event.
          *
@@ -219,7 +231,7 @@ namespace wsrep
          * @param gtid A GTID denoting the current replication position
          * @param bypass Boolean bypass flag.
          *
-         * @return Zero if the SST transfer was succesfully started,
+         * @return Zero if the SST transfer was successfully started,
          *         non-zero otherwise.
          */
         virtual int start_sst(const std::string& sst_request,

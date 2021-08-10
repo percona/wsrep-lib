@@ -53,6 +53,9 @@ namespace wsrep
             , fragments_()
             , commit_fragments_()
             , rollback_fragments_()
+            , toi_write_sets_()
+            , toi_start_transaction_()
+            , toi_commit_()
         { }
 
         enum wsrep::provider::status
@@ -80,12 +83,11 @@ namespace wsrep
             WSREP_OVERRIDE
         {
             ws_handle = wsrep::ws_handle(ws_handle.transaction_id(), (void*)1);
-            wsrep::log_info() << "provider certify: "
-                              << "client: " << client_id.get()
-                              << " flags: " << std::hex << flags
-                              << std::dec
-                              << " certify_status: " << certify_result_;
-
+            wsrep::log_debug() << "provider certify: "
+                               << "client: " << client_id.get()
+                               << " flags: " << std::hex << flags
+                               << std::dec
+                               << " certify_status: " << certify_result_;
             if (certify_result_)
             {
                 return certify_result_;
@@ -102,7 +104,6 @@ namespace wsrep
             }
             if (rolls_back_transaction(flags))
             {
-                assert(0);
                 ++rollback_fragments_;
             }
 
@@ -235,13 +236,29 @@ namespace wsrep
             return wsrep::provider::success;
         }
 
-        enum wsrep::provider::status enter_toi(wsrep::client_id,
+        enum wsrep::provider::status enter_toi(wsrep::client_id client_id,
                                                const wsrep::key_array&,
                                                const wsrep::const_buffer&,
-                                               wsrep::ws_meta&,
-                                               int)
+                                               wsrep::ws_meta& toi_meta,
+                                               int flags)
             WSREP_OVERRIDE
-        { return wsrep::provider::success; }
+        {
+            ++group_seqno_;
+            wsrep::gtid gtid(group_id_, wsrep::seqno(group_seqno_));
+            wsrep::stid stid(server_id_,
+                             wsrep::transaction_id::undefined(),
+                             client_id);
+            toi_meta = wsrep::ws_meta(gtid, stid,
+                                      wsrep::seqno(group_seqno_ - 1),
+                                      flags);
+            ++toi_write_sets_;
+            if (flags & wsrep::provider::flag::start_transaction)
+                ++toi_start_transaction_;
+            if (flags & wsrep::provider::flag::commit)
+                ++toi_commit_;
+            return certify_result_;
+        }
+
         enum wsrep::provider::status leave_toi(wsrep::client_id,
                                                const wsrep::mutable_buffer&)
             WSREP_OVERRIDE
@@ -258,11 +275,16 @@ namespace wsrep
         { return wsrep::provider::success; }
         wsrep::gtid last_committed_gtid() const WSREP_OVERRIDE
         { return wsrep::gtid(); }
-        int sst_sent(const wsrep::gtid&, int) WSREP_OVERRIDE { return 0; }
-        int sst_received(const wsrep::gtid&, int) WSREP_OVERRIDE { return 0; }
+        enum wsrep::provider::status sst_sent(const wsrep::gtid&, int)
+            WSREP_OVERRIDE
+        { return wsrep::provider::success; }
+        enum wsrep::provider::status sst_received(const wsrep::gtid&, int)
+            WSREP_OVERRIDE
+        { return wsrep::provider::success; }
 
-        int enc_set_key(const wsrep::const_buffer&) WSREP_OVERRIDE 
-        { return 0; }
+        enum wsrep::provider::status enc_set_key(const wsrep::const_buffer&)
+            WSREP_OVERRIDE
+        { return wsrep::provider::success; }
 
         std::vector<status_variable> status() const WSREP_OVERRIDE
         {
@@ -315,7 +337,9 @@ namespace wsrep
         size_t fragments() const { return fragments_; }
         size_t commit_fragments() const { return commit_fragments_; }
         size_t rollback_fragments() const { return rollback_fragments_; }
-
+        size_t toi_write_sets() const { return toi_write_sets_; }
+        size_t toi_start_transaction() const { return toi_start_transaction_; }
+        size_t toi_commit() const { return toi_commit_; }
     private:
         wsrep::id group_id_;
         wsrep::id server_id_;
@@ -325,6 +349,9 @@ namespace wsrep
         size_t fragments_;
         size_t commit_fragments_;
         size_t rollback_fragments_;
+        size_t toi_write_sets_;
+        size_t toi_start_transaction_;
+        size_t toi_commit_;
     };
 }
 

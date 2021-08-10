@@ -20,15 +20,17 @@
 #ifndef WSREP_MUTEX_HPP
 #define WSREP_MUTEX_HPP
 
+#include "compiler.hpp"
 #include "exception.hpp"
+
 
 #include <pthread.h>
 
 namespace wsrep
 {
-    //!
-    //! 
-    //!
+    /**
+     * Mutex interface.
+     */
     class mutex
     {
     public:
@@ -56,12 +58,12 @@ namespace wsrep
                 throw wsrep::runtime_error("mutex init failed");
             }
         }
-        ~default_mutex()
+        ~default_mutex() WSREP_OVERRIDE
         {
             if (pthread_mutex_destroy(&mutex_)) ::abort();
         }
 
-        void lock()
+        void lock() WSREP_OVERRIDE
         {
             if (pthread_mutex_lock(&mutex_))
             {
@@ -69,7 +71,7 @@ namespace wsrep
             }
         }
 
-        void unlock()
+        void unlock() WSREP_OVERRIDE
         {
             if (pthread_mutex_unlock(&mutex_))
             {
@@ -77,7 +79,7 @@ namespace wsrep
             }
         }
 
-        void* native()
+        void* native() WSREP_OVERRIDE
         {
             return &mutex_;
         }

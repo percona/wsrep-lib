@@ -32,6 +32,7 @@ namespace db
         high_priority_service(db::server& server, db::client& client);
         int start_transaction(const wsrep::ws_handle&,
                               const wsrep::ws_meta&) override;
+        int next_fragment(const wsrep::ws_meta&) override;
         const wsrep::transaction& transaction() const override;
         int adopt_transaction(const wsrep::transaction&) override;
         int apply_write_set(const wsrep::ws_meta&,
@@ -39,8 +40,9 @@ namespace db
                             wsrep::mutable_buffer&) override;
         int append_fragment_and_commit(
             const wsrep::ws_handle&,
-            const wsrep::ws_meta&, const wsrep::const_buffer&)
-            override
+            const wsrep::ws_meta&,
+            const wsrep::const_buffer&,
+            const wsrep::xid&) override
         { return 0; }
         int remove_fragments(const wsrep::ws_meta&) override
         { return 0; }
@@ -48,6 +50,9 @@ namespace db
         int rollback(const wsrep::ws_handle&, const wsrep::ws_meta&) override;
         int apply_toi(const wsrep::ws_meta&, const wsrep::const_buffer&,
                       wsrep::mutable_buffer&) override;
+        int apply_nbo_begin(const wsrep::ws_meta&, const wsrep::const_buffer&,
+                            wsrep::mutable_buffer&)
+            override;
         void adopt_apply_error(wsrep::mutable_buffer&) override;
         virtual void after_apply() override;
         void store_globals() override { }

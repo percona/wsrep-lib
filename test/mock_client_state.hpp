@@ -72,7 +72,9 @@ namespace wsrep
             , sync_point_action_()
             , bytes_generated_()
             , client_state_(client_state)
+            , will_replay_called_()
             , replays_()
+            , unordered_replays_()
             , aborts_()
         { }
 
@@ -98,10 +100,19 @@ namespace wsrep
                 return 0;
             }
         }
-        void will_replay() WSREP_OVERRIDE { }
 
-        enum wsrep::provider::status
-        replay() WSREP_OVERRIDE;
+        void will_replay() WSREP_OVERRIDE { will_replay_called_ = true; }
+
+        void signal_replayed() WSREP_OVERRIDE { }
+
+        enum wsrep::provider::status replay() WSREP_OVERRIDE;
+
+        enum wsrep::provider::status replay_unordered() WSREP_OVERRIDE
+        {
+            unordered_replays_++;
+            return wsrep::provider::success;
+        }
+
         void wait_for_replayers(
             wsrep::unique_lock<wsrep::mutex>& lock)
             WSREP_OVERRIDE
@@ -126,6 +137,7 @@ namespace wsrep
         }
 
         void cleanup_transaction() WSREP_OVERRIDE { }
+
         size_t bytes_generated() const WSREP_OVERRIDE
         {
             return bytes_generated_;
@@ -133,7 +145,7 @@ namespace wsrep
 
         bool statement_allowed_for_streaming() const WSREP_OVERRIDE
         { return true; }
-        int prepare_fragment_for_replication(wsrep::mutable_buffer& buffer)
+        int prepare_fragment_for_replication(wsrep::mutable_buffer& buffer, size_t& position)
             WSREP_OVERRIDE
         {
             if (error_during_prepare_data_)
@@ -143,11 +155,27 @@ namespace wsrep
             static const char buf[1] = { 1 };
             buffer.push_back(&buf[0], &buf[1]);
             wsrep::const_buffer data(buffer.data(), buffer.size());
+            position = buffer.size();
             return client_state_.append_data(data);
         }
 
         void store_globals() WSREP_OVERRIDE { }
         void reset_globals() WSREP_OVERRIDE { }
+
+        enum wsrep::provider::status commit_by_xid() WSREP_OVERRIDE
+        {
+            return wsrep::provider::success;
+        }
+
+        bool is_explicit_xa() WSREP_OVERRIDE
+        {
+            return false;
+        }
+
+        bool is_xa_rollback() WSREP_OVERRIDE
+        {
+            return false;
+        }
 
         void debug_sync(const char* sync_point) WSREP_OVERRIDE
         {
@@ -193,11 +221,15 @@ namespace wsrep
         //
         // Verifying the state
         //
+        bool will_replay_called() const { return will_replay_called_; }
         size_t replays() const { return replays_; }
+        size_t unordered_replays() const { return unordered_replays_; }
         size_t aborts() const { return aborts_; }
     private:
         wsrep::mock_client_state& client_state_;
+        bool will_replay_called_;
         size_t replays_;
+        size_t unordered_replays_;
         size_t aborts_;
     };
 
