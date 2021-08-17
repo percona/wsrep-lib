@@ -932,6 +932,11 @@ namespace wsrep
             return toi_meta_;
         }
 
+        const wsrep::ws_meta& nbo_meta() const
+        {
+            return nbo_meta_;
+        }
+
         /**
          * Do sync wait operation. If the method fails, current_error()
          * can be inspected about the reason of error.
