@@ -733,6 +733,20 @@ int wsrep::transaction::before_rollback()
             state(lock, s_aborting);
         }
         break;
+    // When DML is replicated in TOI mode.
+    // This could happen while using
+    // pt-table-checksum tool which injects 99997
+    // version into the insert.. select query
+    case wsrep::client_state::m_toi:
+        if(state_ == s_executing)
+        {
+            state(lock, s_aborting);
+        }
+        else
+        {
+            assert(0);
+        }
+        break;
     default:
         assert(0);
         break;
