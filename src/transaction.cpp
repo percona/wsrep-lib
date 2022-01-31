@@ -2052,16 +2052,8 @@ int wsrep::transaction::replay(wsrep::unique_lock<wsrep::mutex>& lock)
             wsrep::e_deadlock_error);
         if (is_streaming())
         {
-<<<<<<< HEAD
             client_service_.remove_fragments(lock);
-            clear_fragments();
-||||||| f271ad0
-            client_service_.remove_fragments();
-            clear_fragments();
-=======
-            client_service_.remove_fragments();
             streaming_context_.cleanup();
->>>>>>> codership/wsrep-lib/master
         }
         state(lock, s_aborted);
         ret = 1;
@@ -2098,13 +2090,7 @@ void wsrep::transaction::cleanup()
     ws_meta_ = wsrep::ws_meta();
     flags_ = 0;
     certified_ = false;
-<<<<<<< HEAD
     force_bf_rollback_ = false;
-    pa_unsafe_ = false;
-||||||| f271ad0
-    pa_unsafe_ = false;
-=======
->>>>>>> codership/wsrep-lib/master
     implicit_deps_ = false;
     sr_keys_.clear();
     streaming_context_.cleanup();

@@ -246,42 +246,6 @@ static int rollback_fragment(wsrep::server_state& server_state,
 
         if (adopt_error == 0)
         {
-<<<<<<< HEAD
-          /* if fragments = 0 then there is special handling by logging
-          dummy write set but this doesn't closes the transaction started
-          as part of adopt transaction. */
-          if (remove_fragments)
-          {
-              ret = high_priority_service.remove_fragments(ws_meta);
-              ret = ret || high_priority_service.commit(ws_handle, ws_meta);
-              ret = ret || (high_priority_service.after_apply(), 0);
-          }
-          else
-          {
-              if (ws_meta.ordered())
-              {
-                  wsrep::mutable_buffer no_error;
-                  ret = high_priority_service.log_dummy_write_set(
-                      ws_handle, ws_meta, no_error);
-              }
-          }
-||||||| f271ad0
-            if (remove_fragments)
-            {
-                ret = high_priority_service.remove_fragments(ws_meta);
-                ret = ret || high_priority_service.commit(ws_handle, ws_meta);
-                ret = ret || (high_priority_service.after_apply(), 0);
-            }
-            else
-            {
-                if (ws_meta.ordered())
-                {
-                    wsrep::mutable_buffer no_error;
-                    ret = high_priority_service.log_dummy_write_set(
-                        ws_handle, ws_meta, no_error);
-                }
-            }
-=======
             if (remove_fragments)
             {
                 high_priority_service.remove_fragments(ws_meta);
@@ -297,7 +261,6 @@ static int rollback_fragment(wsrep::server_state& server_state,
                         ws_handle, ws_meta, no_error);
                 }
             }
->>>>>>> codership/wsrep-lib/master
         }
     }
     return ret;

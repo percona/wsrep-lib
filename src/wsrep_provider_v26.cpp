@@ -649,7 +649,6 @@ namespace
         // assert(not wsrep::tls_service_v1_probe(dlh));
         wsrep::tls_service_v1_deinit(dlh);
     }
-<<<<<<< HEAD
 
     void abort_cb(void)
     {
@@ -666,8 +665,6 @@ namespace
     }
 #endif /* HAVE_PSI_INTERFACE */
 
-||||||| f271ad0
-=======
 
     static int init_allowlist_service(void* dlh,
                                       wsrep::allowlist_service* allowlist_service)
@@ -701,7 +698,6 @@ namespace
     {
         wsrep::event_service_v1_deinit(dlh);
     }
->>>>>>> codership/wsrep-lib/master
 }
 
 
