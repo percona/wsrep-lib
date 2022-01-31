@@ -148,9 +148,14 @@ namespace wsrep
 
         int xa_replay(wsrep::unique_lock<wsrep::mutex>&);
 
-        bool pa_unsafe() const { return pa_unsafe_; }
-        void pa_unsafe(bool pa_unsafe) { pa_unsafe_ = pa_unsafe; }
-
+        bool pa_unsafe() const { return (flags() & wsrep::provider::flag::pa_unsafe); }
+        void pa_unsafe(bool pa_unsafe) {
+          if (pa_unsafe) {
+            flags(flags() | wsrep::provider::flag::pa_unsafe);
+          } else {
+            flags(flags() & ~wsrep::provider::flag::pa_unsafe);
+          }
+        }
         bool implicit_deps() const { return implicit_deps_; }
         void implicit_deps(bool implicit) { implicit_deps_ = implicit; }
 
@@ -193,6 +198,8 @@ namespace wsrep
         int before_statement();
 
         int after_statement();
+
+        void after_command_must_abort(wsrep::unique_lock<wsrep::mutex>&);
 
         void after_applying();
 
@@ -251,7 +258,8 @@ namespace wsrep
         int release_commit_order(wsrep::unique_lock<wsrep::mutex>&);
         void streaming_rollback(wsrep::unique_lock<wsrep::mutex>&);
         int replay(wsrep::unique_lock<wsrep::mutex>&);
-        void clear_fragments();
+        void xa_replay_common(wsrep::unique_lock<wsrep::mutex>&);
+        int xa_replay_commit(wsrep::unique_lock<wsrep::mutex>&);
         void cleanup();
         void debug_log_state(const char*) const;
         void debug_log_key_append(const wsrep::key& key) const;
@@ -270,7 +278,6 @@ namespace wsrep
         wsrep::ws_handle ws_handle_;
         wsrep::ws_meta ws_meta_;
         int flags_;
-        bool pa_unsafe_;
         bool implicit_deps_;
         bool certified_;
         bool force_bf_rollback_;
@@ -279,6 +286,7 @@ namespace wsrep
         wsrep::sr_key_set sr_keys_;
         wsrep::mutable_buffer apply_error_buf_;
         wsrep::xid xid_;
+        bool streaming_rollback_in_progress_;
     };
 
     static inline const char* to_c_string(enum wsrep::transaction::state state)

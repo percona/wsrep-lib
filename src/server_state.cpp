@@ -246,6 +246,7 @@ static int rollback_fragment(wsrep::server_state& server_state,
 
         if (adopt_error == 0)
         {
+<<<<<<< HEAD
           /* if fragments = 0 then there is special handling by logging
           dummy write set but this doesn't closes the transaction started
           as part of adopt transaction. */
@@ -264,6 +265,39 @@ static int rollback_fragment(wsrep::server_state& server_state,
                       ws_handle, ws_meta, no_error);
               }
           }
+||||||| f271ad0
+            if (remove_fragments)
+            {
+                ret = high_priority_service.remove_fragments(ws_meta);
+                ret = ret || high_priority_service.commit(ws_handle, ws_meta);
+                ret = ret || (high_priority_service.after_apply(), 0);
+            }
+            else
+            {
+                if (ws_meta.ordered())
+                {
+                    wsrep::mutable_buffer no_error;
+                    ret = high_priority_service.log_dummy_write_set(
+                        ws_handle, ws_meta, no_error);
+                }
+            }
+=======
+            if (remove_fragments)
+            {
+                high_priority_service.remove_fragments(ws_meta);
+                high_priority_service.commit(ws_handle, ws_meta);
+                high_priority_service.after_apply();
+            }
+            else
+            {
+                if (ws_meta.ordered())
+                {
+                    wsrep::mutable_buffer no_error;
+                    ret = high_priority_service.log_dummy_write_set(
+                        ws_handle, ws_meta, no_error);
+                }
+            }
+>>>>>>> codership/wsrep-lib/master
         }
     }
     return ret;
@@ -364,7 +398,8 @@ static int apply_write_set(wsrep::server_state& server_state,
                              ws_meta,
                              data);
     }
-    else if (ws_meta.flags() == 0 || wsrep::prepares_transaction(ws_meta.flags()))
+    else if (ws_meta.flags() == 0 || ws_meta.flags() == wsrep::provider::flag::pa_unsafe ||
+             wsrep::prepares_transaction(ws_meta.flags()))
     {
         wsrep::high_priority_service* sa(
             server_state.find_streaming_applier(
@@ -672,8 +707,10 @@ int wsrep::server_state::start_sst(const std::string& sst_request,
     if (server_service_.start_sst(sst_request, gtid, bypass))
     {
         lock.lock();
-        wsrep::log_warning() << "SST start failed";
-        state(lock, s_synced);
+        wsrep::log_warning() << "SST preparation failed";
+        // v26 API does not have JOINED event, so in anticipation of SYNCED
+        // we must do it here.
+        state(lock, s_joined);
         ret = 1;
     }
     return ret;
@@ -687,6 +724,8 @@ void wsrep::server_state::sst_sent(const wsrep::gtid& gtid, int error)
         wsrep::log_info() << "SST sending failed: " << error;
 
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    // v26 API does not have JOINED event, so in anticipation of SYNCED
+    // we must do it here.
     state(lock, s_joined);
     lock.unlock();
     enum provider::status const retval(provider().sst_sent(gtid, error));
@@ -729,7 +768,6 @@ void wsrep::server_state::sst_received(wsrep::client_service& cs,
                 assert(init_initialized_);
             }
         }
-        state(lock, s_joined);
         lock.unlock();
 
         if (id_.is_undefined())
@@ -741,6 +779,16 @@ void wsrep::server_state::sst_received(wsrep::client_service& cs,
 
         gtid = server_service_.get_position(cs);
         wsrep::log_info() << "Recovered position from storage: " << gtid;
+
+        lock.lock();
+        if (gtid.seqno() >= connected_gtid().seqno())
+        {
+            /* Now the node has all the data the cluster has: part in
+             * storage, part in replication event queue. */
+            state(lock, s_joined);
+        }
+        lock.unlock();
+
         wsrep::view const v(server_service_.get_view(cs, id_));
         wsrep::log_info() << "Recovered view from SST:\n" << v;
 
@@ -819,21 +867,6 @@ void wsrep::server_state::initialized()
         state(lock, s_initializing);
         state(lock, s_initialized);
     }
-}
-
-void wsrep::server_state::last_committed_gtid(const wsrep::gtid& gtid)
-{
-    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-    assert(last_committed_gtid_.is_undefined() ||
-           last_committed_gtid_.seqno() + 1 == gtid.seqno());
-    last_committed_gtid_ = gtid;
-    cond_.notify_all();
-}
-
-wsrep::gtid wsrep::server_state::last_committed_gtid() const
-{
-    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-    return last_committed_gtid_;
 }
 
 enum wsrep::provider::status
@@ -915,7 +948,7 @@ void wsrep::server_state::on_connect(const wsrep::view& view)
 }
 
 void wsrep::server_state::on_primary_view(
-    const wsrep::view& view WSREP_UNUSED,
+    const wsrep::view& view,
     wsrep::high_priority_service* high_priority_service)
 {
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
@@ -952,14 +985,7 @@ void wsrep::server_state::on_primary_view(
                 // If server side has already been initialized,
                 // skip directly to s_joined.
                 state(lock, s_initialized);
-                state(lock, s_joined);
             }
-        }
-        else if (state_ == s_joiner)
-        {
-            // Got partiioned from the cluster, got IST and
-            // started applying actions.
-            state(lock, s_joined);
         }
     }
     else
@@ -968,14 +994,7 @@ void wsrep::server_state::on_primary_view(
         {
             state(lock, s_joiner);
         }
-        if (init_initialized_ && state_ != s_joined)
-        {
-            // If server side has already been initialized,
-            // skip directly to s_joined.
-            state(lock, s_joined);
-        }
     }
-
     if (init_initialized_ == false)
     {
         lock.unlock();
@@ -1000,27 +1019,11 @@ void wsrep::server_state::on_primary_view(
         close_orphaned_sr_transactions(lock, *high_priority_service);
     }
 
-    if (server_service_.sst_before_init())
+    if (state(lock) < s_joined &&
+        view.state_id().seqno() >= connected_gtid().seqno())
     {
-        if (state_ == s_initialized)
-        {
-            state(lock, s_joined);
-            if (init_synced_)
-            {
-                state(lock, s_synced);
-            }
-        }
-    }
-    else
-    {
-        if (state_ == s_joiner)
-        {
-            state(lock, s_joined);
-            if (init_synced_)
-            {
-                state(lock, s_synced);
-            }
-        }
+        // If we progressed beyond connected seqno, it means we have full state
+        state(lock, s_joined);
     }
 }
 
@@ -1101,19 +1104,20 @@ void wsrep::server_state::on_sync()
         {
         case s_synced:
             break;
-        case s_connected:
-            state(lock, s_joiner);
-            // fall through
-        case s_joiner:
-            state(lock, s_initializing);
+        case s_connected:                 // Seed node path: provider becomes
+            state(lock, s_joiner);        // synced with itself before anything
+            WSREP_FALLTHROUGH;            // else. Then goes DB initialization.
+        case s_joiner:                    // |
+            state(lock, s_initializing);  // V
             break;
         case s_donor:
+            assert(false); // this should never happen
             state(lock, s_joined);
             state(lock, s_synced);
             break;
         case s_initialized:
             state(lock, s_joined);
-            // fall through
+            WSREP_FALLTHROUGH;
         default:
             /* State */
             state(lock, s_synced);
@@ -1130,6 +1134,14 @@ void wsrep::server_state::on_sync()
         }
     }
     init_synced_ = true;
+
+    enum wsrep::provider::status status(send_pending_rollback_events(lock));
+    if (status)
+    {
+        // TODO should be retried?
+        wsrep::log_warning()
+            << "Failed to flush rollback event cache: " << status;
+    }
 }
 
 int wsrep::server_state::on_apply(
@@ -1366,14 +1378,14 @@ void wsrep::server_state::state(
     assert(lock.owns_lock());
     static const char allowed[n_states_][n_states_] =
         {
-            /* dis, ing, ized, cted, jer, jed, dor, sed, ding */
+            /* dis, ing, ized, cted, jer, jed, dor, sed, ding to/from */
             {  0,   1,   0,    1,    0,   0,   0,   0,   0}, /* dis */
             {  1,   0,   1,    0,    0,   0,   0,   0,   1}, /* ing */
             {  1,   0,   0,    1,    0,   1,   0,   0,   1}, /* ized */
             {  1,   0,   0,    1,    1,   0,   0,   1,   1}, /* cted */
             {  1,   1,   0,    0,    0,   1,   0,   0,   1}, /* jer */
             {  1,   0,   0,    1,    0,   0,   1,   1,   1}, /* jed */
-            {  1,   0,   0,    1,    0,   1,   0,   1,   1}, /* dor */
+            {  1,   0,   0,    1,    0,   1,   0,   0,   1}, /* dor */
             {  1,   0,   0,    1,    0,   1,   1,   0,   1}, /* sed */
             {  1,   0,   0,    0,    0,   0,   0,   0,   0}  /* ding */
         };
@@ -1473,6 +1485,10 @@ void wsrep::server_state::close_orphaned_sr_transactions(
     // - (1 non-primary) and (2 non-primary)
     // - (1,2 primary)
     // We need to rollback SRs owned by both 1 and 2.
+    // Notice that since the introduction of rollback_event_queue_,
+    // checking for equal consecutive views is no longer needed.
+    // However, we must keep it here for the time being, for backwards
+    // compatibility.
     const bool equal_consecutive_views =
         current_view_.equal_membership(previous_primary_view_);
 
@@ -1521,10 +1537,8 @@ void wsrep::server_state::close_orphaned_sr_transactions(
         if ((streaming_applier->transaction().state() !=
              wsrep::transaction::s_prepared) &&
             (equal_consecutive_views ||
-             (std::find_if(current_view_.members().begin(),
-                           current_view_.members().end(),
-                           server_id_cmp(i->first.first)) ==
-              current_view_.members().end())))
+             not current_view_.is_member(
+                 streaming_applier->transaction().server_id())))
         {
             WSREP_LOG_DEBUG(wsrep::log::debug_log_level(),
                             wsrep::log::debug_level_server_state,
@@ -1596,4 +1610,51 @@ void wsrep::server_state::close_transactions_at_disconnect(
         high_priority_service.store_globals();
     }
     streaming_appliers_recovered_ = false;
+}
+
+//
+// Rollback event queue
+//
+
+void wsrep::server_state::queue_rollback_event(
+    const wsrep::transaction_id& id)
+{
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+#ifndef NDEBUG
+    // Make sure we don't have duplicate
+    // transaction ids in rollback event queue.
+    // There is no need to do this in release
+    // build given that caller (streaming_rollback())
+    // should avoid duplicates.
+    for (auto i : rollback_event_queue_)
+    {
+        assert(id != i);
+    }
+#endif
+    rollback_event_queue_.push_back(id);
+}
+
+enum wsrep::provider::status
+wsrep::server_state::send_pending_rollback_events(
+    wsrep::unique_lock<wsrep::mutex>& lock WSREP_UNUSED)
+{
+    assert(lock.owns_lock());
+    while (not rollback_event_queue_.empty())
+    {
+        const wsrep::transaction_id& id(rollback_event_queue_.front());
+        const enum wsrep::provider::status status(provider().rollback(id));
+        if (status)
+        {
+            return status;
+        }
+        rollback_event_queue_.pop_front();
+    }
+    return wsrep::provider::success;
+}
+
+enum wsrep::provider::status
+wsrep::server_state::send_pending_rollback_events()
+{
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    return send_pending_rollback_events(lock);
 }
