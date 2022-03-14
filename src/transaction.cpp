@@ -101,7 +101,6 @@ wsrep::transaction::transaction(
     , ws_handle_()
     , ws_meta_()
     , flags_()
-    , pa_unsafe_(false)
     , implicit_deps_(false)
     , certified_(false)
     , force_bf_rollback_(false)
@@ -110,6 +109,7 @@ wsrep::transaction::transaction(
     , sr_keys_()
     , apply_error_buf_()
     , xid_()
+    , streaming_rollback_in_progress_(false)
 { }
 
 
@@ -236,6 +236,7 @@ int wsrep::transaction::assign_read_view(const wsrep::gtid* const gtid)
 
 int wsrep::transaction::append_key(const wsrep::key& key)
 {
+    assert(active());
     try
     {
         debug_log_key_append(key);
@@ -251,7 +252,7 @@ int wsrep::transaction::append_key(const wsrep::key& key)
 
 int wsrep::transaction::append_data(const wsrep::const_buffer& data)
 {
-
+    assert(active());
     return provider().append_data(ws_handle_, data);
 }
 
@@ -329,7 +330,7 @@ int wsrep::transaction::before_prepare(
             {
                 // Force fragment replication on XA prepare
                 flags(flags() | wsrep::provider::flag::prepare);
-                flags(flags() | wsrep::provider::flag::pa_unsafe);
+                pa_unsafe(true);
                 append_sr_keys_for_commit();
                 const bool force_streaming_step = true;
                 ret = streaming_step(lock, force_streaming_step);
@@ -633,7 +634,7 @@ int wsrep::transaction::after_commit()
             client_state_.server_state_.stop_streaming_client(&client_state_);
             lock.lock();
         }
-        clear_fragments();
+        streaming_context_.cleanup();
     }
 
     switch (client_state_.mode())
@@ -650,7 +651,6 @@ int wsrep::transaction::after_commit()
     assert(ret == 0);
     state(lock, s_committed);
 
-    // client_state_.server_state().last_committed_gtid(ws_meta.gitd());
     debug_log_state("after_commit_leave");
     return ret;
 }
@@ -680,9 +680,9 @@ int wsrep::transaction::before_rollback()
         case s_preparing:
             // Error detected during prepare phase
             state(lock, s_must_abort);
-            // fall through
+            WSREP_FALLTHROUGH;
         case s_prepared:
-            // fall through
+            WSREP_FALLTHROUGH;
         case s_executing:
             // Voluntary rollback
             if (is_streaming())
@@ -785,7 +785,7 @@ int wsrep::transaction::after_rollback()
 
     if (is_streaming() && state() != s_must_replay)
     {
-        clear_fragments();
+        streaming_context_.cleanup();
     }
 
     if (state() == s_aborting)
@@ -852,7 +852,13 @@ int wsrep::transaction::after_statement()
         break;
     case s_must_abort:
     case s_cert_failed:
-        client_state_.override_error(wsrep::e_deadlock_error);
+        // Error may be set already. For example, if fragment size
+        // exceeded the maximum size in certify_fragment(), then
+        // we already have wsrep::e_error_during_commit
+        if (client_state_.current_error() == wsrep::e_success)
+        {
+            client_state_.override_error(wsrep::e_deadlock_error);
+        }
         lock.unlock();
         ret = client_service_.bf_rollback();
         lock.lock();
@@ -861,12 +867,12 @@ int wsrep::transaction::after_statement()
             break;
         }
         // Continue to replay if rollback() changed the state to s_must_replay
-        // Fall through
+        WSREP_FALLTHROUGH;
     case s_must_replay:
     {
         if (is_xa() && !ordered())
         {
-            ret = xa_replay(lock);
+            ret = xa_replay_commit(lock);
         }
         else
         {
@@ -915,6 +921,34 @@ int wsrep::transaction::after_statement()
     debug_log_state("after_statement_leave");
     assert(ret == 0 || state() == s_aborted);
     return ret;
+}
+
+void wsrep::transaction::after_command_must_abort(
+    wsrep::unique_lock<wsrep::mutex>& lock)
+{
+    debug_log_state("after_command_must_abort enter");
+    assert(active());
+    assert(state_ == s_must_abort);
+
+    if (is_xa() && is_streaming())
+    {
+        state(lock, s_must_replay);
+    }
+
+    lock.unlock();
+    client_service_.bf_rollback();
+    lock.lock();
+
+    if (is_xa() && is_streaming())
+    {
+        xa_replay(lock);
+    }
+    else
+    {
+        client_state_.override_error(wsrep::e_deadlock_error);
+    }
+
+    debug_log_state("after_command_must_abort leave");
 }
 
 void wsrep::transaction::after_applying()
@@ -1127,16 +1161,15 @@ int wsrep::transaction::commit_or_rollback_by_xid(const wsrep::xid& xid,
         return 1;
     }
 
-    int flags(0);
     if (commit)
     {
-        flags = wsrep::provider::flag::commit;
+        flags(wsrep::provider::flag::commit);
     }
     else
     {
-        flags = wsrep::provider::flag::rollback;
+        flags(wsrep::provider::flag::rollback);
     }
-    flags = flags | wsrep::provider::flag::pa_unsafe;
+    pa_unsafe(true);
     wsrep::stid stid(sa->transaction().server_id(),
                      sa->transaction().id(),
                      client_state_.id());
@@ -1145,7 +1178,7 @@ int wsrep::transaction::commit_or_rollback_by_xid(const wsrep::xid& xid,
     const enum wsrep::provider::status cert_ret(
         provider().certify(client_state_.id(),
                            ws_handle_,
-                           flags,
+                           flags(),
                            meta));
 
     int ret;
@@ -1194,9 +1227,8 @@ void wsrep::transaction::xa_detach()
     debug_log_state("xa_detach leave");
 }
 
-int wsrep::transaction::xa_replay(wsrep::unique_lock<wsrep::mutex>& lock)
+void wsrep::transaction::xa_replay_common(wsrep::unique_lock<wsrep::mutex>& lock)
 {
-    debug_log_state("xa_replay enter");
     assert(lock.owns_lock());
     assert(is_xa());
     assert(is_streaming());
@@ -1218,42 +1250,49 @@ int wsrep::transaction::xa_replay(wsrep::unique_lock<wsrep::mutex>& lock)
     {
         client_service_.emergency_shutdown();
     }
+}
 
+int wsrep::transaction::xa_replay(wsrep::unique_lock<wsrep::mutex>& lock)
+{
+    debug_log_state("xa_replay enter");
+    xa_replay_common(lock);
+    state(lock, s_aborted);
+    streaming_context_.cleanup();
+    provider().release(ws_handle_);
+    cleanup();
+    client_service_.signal_replayed();
+    debug_log_state("xa_replay leave");
+    return 0;
+}
+
+int wsrep::transaction::xa_replay_commit(wsrep::unique_lock<wsrep::mutex>& lock)
+{
+    debug_log_state("xa_replay_commit enter");
+    xa_replay_common(lock);
+    lock.unlock();
+    enum wsrep::provider::status status(client_service_.commit_by_xid());
+    lock.lock();
     int ret(1);
-    if (bf_abort_client_state_ == wsrep::client_state::s_idle)
+    switch (status)
     {
-        state(lock, s_aborted);
+    case wsrep::provider::success:
+        state(lock, s_committed);
         streaming_context_.cleanup();
         provider().release(ws_handle_);
         cleanup();
         ret = 0;
-    }
-    else
-    {
-        lock.unlock();
-        enum wsrep::provider::status status(client_service_.commit_by_xid());
-        lock.lock();
-        switch (status)
-        {
-        case wsrep::provider::success:
-            state(lock, s_committed);
-            streaming_context_.cleanup();
-            provider().release(ws_handle_);
-            cleanup();
-            ret = 0;
-            break;
-        default:
-            log_warning() << "Failed to commit by xid during replay";
-            // Commit by xid failed, return a commit
-            // error and let the client retry
-            state(lock, s_preparing);
-            state(lock, s_prepared);
-            client_state_.override_error(wsrep::e_error_during_commit, status);
-        }
+        break;
+    default:
+        log_warning() << "Failed to commit by xid during replay";
+        // Commit by xid failed, return a commit
+        // error and let the client retry
+        state(lock, s_preparing);
+        state(lock, s_prepared);
+        client_state_.override_error(wsrep::e_error_during_commit, status);
     }
 
     client_service_.signal_replayed();
-    debug_log_state("xa_replay leave");
+    debug_log_state("xa_replay_commit leave");
     return ret;
 }
 
@@ -1385,7 +1424,7 @@ int wsrep::transaction::streaming_step(wsrep::unique_lock<wsrep::mutex>& lock,
     switch (streaming_context_.fragment_unit())
     {
     case streaming_context::row:
-        // fall through
+        WSREP_FALLTHROUGH;
     case streaming_context::statement:
         streaming_context_.increment_unit_counter(1);
         break;
@@ -1432,6 +1471,19 @@ int wsrep::transaction::certify_fragment(
     state(lock, s_certifying);
     lock.unlock();
     client_service_.debug_sync("wsrep_before_fragment_certification");
+
+    enum wsrep::provider::status status(
+        client_state_.server_state_.send_pending_rollback_events());
+    if (status)
+    {
+        wsrep::log_warning()
+            << "Failed to replicate pending rollback events: "
+            << status << " ("
+            << wsrep::provider::to_string(status) << ")";
+        lock.lock();
+        state(lock, s_must_abort);
+        return 1;
+    }
 
     wsrep::mutable_buffer data;
     size_t log_position(0);
@@ -1503,14 +1555,22 @@ int wsrep::transaction::certify_fragment(
         // available to store the fragment. The fragment meta data
         // is updated after certification.
         wsrep::id server_id(client_state_.server_state().id());
-        assert(server_id.is_undefined() == false);
-        if (storage_service.start_transaction(ws_handle_) ||
-            storage_service.append_fragment(
-                server_id,
-                id(),
-                flags(),
-                wsrep::const_buffer(data.data(), data.size()),
-                xid()))
+
+        if (server_id.is_undefined()) {
+            // Server disconnected from cluster, do not
+            // append a fragment with undefined server_id.
+            ret = 1;
+            error = wsrep::e_append_fragment_error;
+        }
+
+        if (ret == 0 &&
+            (storage_service.start_transaction(ws_handle_) ||
+             storage_service.append_fragment(
+                 server_id,
+                 id(),
+                 flags(),
+                 wsrep::const_buffer(data.data(), data.size()),
+                 xid())))
         {
             ret = 1;
             error = wsrep::e_append_fragment_error;
@@ -1652,6 +1712,7 @@ int wsrep::transaction::certify_fragment(
         assert(state_ == s_certifying);
         state(lock, s_executing);
         flags(flags() & ~wsrep::provider::flag::start_transaction);
+        flags(flags() & ~wsrep::provider::flag::pa_unsafe);
     }
     return ret;
 }
@@ -1677,13 +1738,39 @@ int wsrep::transaction::certify_commit(
     state(lock, s_certifying);
     lock.unlock();
 
+    enum wsrep::provider::status status(
+        client_state_.server_state_.send_pending_rollback_events());
+    if (status)
+    {
+        wsrep::log_warning()
+            << "Failed to replicate pending rollback events: "
+            << status << " ("
+            << wsrep::provider::to_string(status) << ")";
+
+        // We failed to replicate some pending rollback fragment.
+        // Meaning that some transaction that was rolled back
+        // locally might still be active out there in the cluster.
+        // To avoid a potential BF-BF conflict, we need to abort
+        // and give up on this one.
+        // Notice that we can't abort a prepared XA that wants to
+        // commit. Fortunately, there is no need to in this case:
+        // the commit fragment for XA does not cause any changes and
+        // can't possibly conflict with other transactions out there.
+        if (!is_xa())
+        {
+            lock.lock();
+            state(lock, s_must_abort);
+            return 1;
+        }
+    }
+
     if (is_streaming())
     {
         if (!is_xa())
         {
             append_sr_keys_for_commit();
         }
-        flags(flags() | wsrep::provider::flag::pa_unsafe);
+        pa_unsafe(true);
     }
 
     if (implicit_deps())
@@ -1862,19 +1949,30 @@ int wsrep::transaction::append_sr_keys_for_commit()
     return ret;
 }
 
-void wsrep::transaction::streaming_rollback(wsrep::unique_lock<wsrep::mutex>& lock)
+void wsrep::transaction::streaming_rollback(
+    wsrep::unique_lock<wsrep::mutex>& lock)
 {
     debug_log_state("streaming_rollback enter");
     assert(state_ != s_must_replay);
     assert(is_streaming());
+    assert(lock.owns_lock());
+
+    // Prevent streaming_rollback() to be executed simultaneously.
+    // Notice that lock is unlocked when calling into server_state
+    // methods, to avoid violating lock order.
+    // The condition variable below prevents a thread to go
+    // through streaming_rollback() while another thread is busy
+    // stopping or converting the streaming_client().
+    // This would be problematic if a thread is performing BF abort,
+    // while the original client manages to complete its rollback
+    // and therefore change the state of the transaction, causing
+    // assertions to fire.
+    while (streaming_rollback_in_progress_)
+        client_state_.cond_.wait(lock);
+    streaming_rollback_in_progress_ = true;
+
     if (streaming_context_.rolled_back() == false)
     {
-        // We must set rolled_back id before stopping streaming client
-        // or converting to applier. Accessing server_state requires
-        // releasing the client_state lock in order to avoid violating
-        // locking order, and this will open up a possibility for two
-        // threads accessing this block simultaneously.
-        streaming_context_.rolled_back(id_);
         if (bf_aborted_in_total_order_)
         {
             lock.unlock();
@@ -1886,27 +1984,35 @@ void wsrep::transaction::streaming_rollback(wsrep::unique_lock<wsrep::mutex>& lo
             // Create a high priority applier which will handle the
             // rollback fragment or clean up on configuration change.
             // Adopt transaction will copy fragment set and appropriate
-            // meta data. Mark current transaction streaming context
-            // rolled back.
+            // meta data.
             lock.unlock();
+            server_service_.debug_sync("wsrep_streaming_rollback");
             client_state_.server_state_.convert_streaming_client_to_applier(
                 &client_state_);
             lock.lock();
             streaming_context_.cleanup();
-            // Cleanup cleans rolled_back_for from streaming context, but
-            // we want to preserve it to avoid executing this block
-            // more than once.
-            streaming_context_.rolled_back(id_);
-            enum wsrep::provider::status ret;
-            if ((ret = provider().rollback(id_)))
+
+            enum wsrep::provider::status status(provider().rollback(id_));
+            if (status)
             {
+                lock.unlock();
+                client_state_.server_state_.queue_rollback_event(id_);
+                lock.lock();
                 wsrep::log_debug()
-                    << "Failed to replicate rollback fragment for "
-                    << id_ << ": " << ret;
+                    << "Failed to replicate rollback fragment for " << id_
+                    << ": " << status << " ( "
+                    << wsrep::provider::to_string(status) << ")";
             }
         }
+
+        // Mark the streaming context as rolled back,
+        // so that this block is executed once.
+        streaming_context_.rolled_back(id_);
     }
+
     debug_log_state("streaming_rollback leave");
+    streaming_rollback_in_progress_ = false;
+    client_state_.cond_.notify_all();
 }
 
 int wsrep::transaction::replay(wsrep::unique_lock<wsrep::mutex>& lock)
@@ -1937,7 +2043,7 @@ int wsrep::transaction::replay(wsrep::unique_lock<wsrep::mutex>& lock)
         }
         if (is_streaming())
         {
-            clear_fragments();
+            streaming_context_.cleanup();
         }
         provider().release(ws_handle_);
         break;
@@ -1947,7 +2053,7 @@ int wsrep::transaction::replay(wsrep::unique_lock<wsrep::mutex>& lock)
         if (is_streaming())
         {
             client_service_.remove_fragments(lock);
-            clear_fragments();
+            streaming_context_.cleanup();
         }
         state(lock, s_aborted);
         ret = 1;
@@ -1961,11 +2067,6 @@ int wsrep::transaction::replay(wsrep::unique_lock<wsrep::mutex>& lock)
                     wsrep::log::debug_level_transaction,
                     "replay returned" << replay_ret);
     return ret;
-}
-
-void wsrep::transaction::clear_fragments()
-{
-    streaming_context_.cleanup();
 }
 
 void wsrep::transaction::cleanup()
@@ -1990,7 +2091,6 @@ void wsrep::transaction::cleanup()
     flags_ = 0;
     certified_ = false;
     force_bf_rollback_ = false;
-    pa_unsafe_ = false;
     implicit_deps_ = false;
     sr_keys_.clear();
     streaming_context_.cleanup();

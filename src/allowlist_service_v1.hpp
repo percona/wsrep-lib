@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Codership Oy <info@codership.com>
+ * Copyright (C) 2021 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -17,38 +17,39 @@
  * along with wsrep-lib.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef WSREP_TLS_SERVICE_V1_HPP
-#define WSREP_TLS_SERVICE_V1_HPP
+#ifndef WSREP_ALLOWLIST_SERVICE_V1_HPP
+#define WSREP_ALLOWLIST_SERVICE_V1_HPP
 
 namespace wsrep
 {
-    class tls_service;
+    class allowlist_service;
     /**
-     * Probe tls_service_v1 support in loaded library.
+     * Probe allowlist_service_v1 support in loaded library.
      *
      * @param dlh Handle returned by dlopen().
      *
      * @return Zero on success, non-zero system error code on failure.
      */
-    int tls_service_v1_probe(void *dlh);
+    int allowlist_service_v1_probe(void *dlh);
 
     /**
-     * Initialize TLS service.
+     * Initialize the allowlist service.
      *
      * @param dlh Handle returned by dlopen().
-     * @params tls_service Pointer to wsrep::thread_service implementation.
+     * @param allowlist_service Pointer to wsrep::allowlist_service implementation.
      *
      * @return Zero on success, non-zero system error code on failure.
      */
-    int tls_service_v1_init(void* dlh,
-                            wsrep::tls_service* tls_service);
+    int allowlist_service_v1_init(void* dlh,
+                                  wsrep::allowlist_service* allowlist_service);
 
     /**
-     * Deinitialize TLS service.
+     * Deinitialize the allowlist service.
      *
-     * @param dlh Handler returned by dlopen().
+     * @params dlh Handler returned by dlopen().
      */
-    void tls_service_v1_deinit(void* dlh);
+    void allowlist_service_v1_deinit(void* dlh);
+
 }
 
-#endif // WSREP_TLS_SERVICE_V1_HPP
+#endif // WSREP_allowlist_SERVICE_V1_HPP
