@@ -55,6 +55,9 @@ extern void wsrep_pfs_instr_cb(wsrep_pfs_instr_type_t type,
                                void **alliedvalue __attribute__((unused)),
                                const void *ts __attribute__((unused)));
 
+extern std::string wsrep_get_master_key(const std::string& keyId);
+extern bool wsrep_new_master_key(const std::string& keyId);
+
 namespace
 {
     /////////////////////////////////////////////////////////////////////
@@ -656,7 +659,7 @@ namespace
     }
 
 #ifdef HAVE_PSI_INTERFACE
-    void pfs_instr_cb(wsrep_pfs_instr_type_t type, wsrep_pfs_instr_ops_t ops,
+    static void pfs_instr_cb(wsrep_pfs_instr_type_t type, wsrep_pfs_instr_ops_t ops,
                       wsrep_pfs_instr_tag_t tag,
                       void **value __attribute__((unused)),
                       void **alliedvalue __attribute__((unused)),
@@ -665,6 +668,22 @@ namespace
     }
 #endif /* HAVE_PSI_INTERFACE */
 
+    static wsrep_cb_status enc_get_key_cb(const wsrep_buf_t* keyId,
+                                          wsrep_enc_key_t* key) {
+        std::string skeyId(static_cast<const char*>(keyId->ptr), keyId->len);
+        std::string skey = wsrep_get_master_key(skeyId);
+        if (skey.length() == 0 || skey.length() > key->len) {
+            return WSREP_CB_FAILURE;
+        }
+        memcpy(const_cast<void*>(key->ptr), skey.c_str(), skey.length());
+        return WSREP_CB_SUCCESS;
+    }
+
+    static wsrep_cb_status enc_new_key_cb(const wsrep_buf_t* keyId) {
+        std::string skeyId(static_cast<const char*>(keyId->ptr), keyId->len);
+        bool res = wsrep_new_master_key(skeyId);
+        return res ? WSREP_CB_FAILURE: WSREP_CB_SUCCESS;
+    }
 
     static int init_allowlist_service(void* dlh,
                                       wsrep::allowlist_service* allowlist_service)
@@ -793,6 +812,8 @@ wsrep::wsrep_provider_v26::wsrep_provider_v26(
 #ifdef HAVE_PSI_INTERFACE
   init_args.pfs_instr_cb = pfs_instr_cb;
 #endif /* HAVE_PSI_INTERFACE */
+  init_args.enc_get_key_cb = enc_get_key_cb;
+  init_args.enc_new_key_cb = enc_new_key_cb;
 
   if (wsrep_load(provider_spec.c_str(), &wsrep_, &logger_cb)) {
     throw wsrep::runtime_error("Failed to load wsrep library");
@@ -1212,3 +1233,8 @@ void wsrep::wsrep_provider_v26::fetch_pfs_info(wsrep_node_info_t *nodes,
     return wsrep_->fetch_pfs_info(wsrep_, nodes, size);
 }
 
+enum wsrep::provider::status
+wsrep::wsrep_provider_v26::rotate_gcache_key()
+{
+    return map_return_value(wsrep_->rotate_gcache_key(wsrep_));
+}
