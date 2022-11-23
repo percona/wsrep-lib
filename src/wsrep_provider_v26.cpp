@@ -676,6 +676,7 @@ namespace
             return WSREP_CB_FAILURE;
         }
         memcpy(const_cast<void*>(key->ptr), skey.c_str(), skey.length());
+        key->len = skey.length();
         return WSREP_CB_SUCCESS;
     }
 
