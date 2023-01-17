@@ -424,6 +424,11 @@ namespace wsrep
         virtual void fetch_pfs_info(wsrep_node_info_t *nodes, uint32_t size) = 0;
 
         /**
+         * Request GCache encryption Master Key rotation.
+         */
+        virtual enum wsrep::provider::status rotate_gcache_key() = 0;
+
+        /**
          * Services argument passed to make_provider. This struct contains
          * optional services which are passed to the provider.
          */
