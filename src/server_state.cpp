@@ -705,17 +705,9 @@ void wsrep::server_state::sst_sent(const wsrep::gtid& gtid, int error)
     }
 }
 
-<<<<<<< HEAD
-void wsrep::server_state::sst_received(wsrep::client_service& cs,
-                                       int const error, bool* awaiting_callback)
-||||||| 344544d
-void wsrep::server_state::sst_received(wsrep::client_service& cs,
-                                       int const error)
-=======
 int wsrep::server_state::sst_received(wsrep::client_service& cs,
-                                       int const error)
+                                       int const error, bool* awaiting_callback)
 try
->>>>>>> codership/wsrep-lib/master
 {
     wsrep::log_info() << "Processing SST received";
     wsrep::gtid gtid(wsrep::gtid::undefined());
@@ -740,7 +732,7 @@ try
                 } catch (const wsrep::runtime_error &e) {
                   lock.unlock();
                   wsrep::log_error() << "SST failed/interrupted";
-                  return;
+                  return 1;
                 }
                 assert(init_initialized_);
             }

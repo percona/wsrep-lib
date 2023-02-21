@@ -508,23 +508,13 @@ namespace wsrep
          *
          * @param client_service
          * @param error code of the SST operation
-<<<<<<< HEAD
          * @param awaiting_callback is cleared if sst receieved is signal
          *                          to galera module
-||||||| 344544d
-=======
          *
          * @return Zero in case of success, non-zero on error.
->>>>>>> codership/wsrep-lib/master
          */
-<<<<<<< HEAD
-        void sst_received(wsrep::client_service &cs, int error,
+        int sst_received(wsrep::client_service &cs, int error,
                           bool *awaiting_callback = NULL);
-||||||| 344544d
-        void sst_received(wsrep::client_service& cs, int error);
-=======
-        int sst_received(wsrep::client_service& cs, int error);
->>>>>>> codership/wsrep-lib/master
 
         /**
          * This method must be called after the server initialization
