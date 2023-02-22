@@ -369,12 +369,11 @@ namespace wsrep
 
         /**
          * Wait until server reaches given state.
+         *
+         * @return Zero in case of success, non-zero if the
+         * wait was interrupted.
          */
-        void wait_until_state(enum state state) const
-        {
-            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            wait_until_state(lock, state);
-        }
+        int wait_until_state(enum state state) const;
 
         /**
          * Return GTID at the position when server connected to
@@ -511,8 +510,10 @@ namespace wsrep
          * @param error code of the SST operation
          * @param awaiting_callback is cleared if sst receieved is signal
          *                          to galera module
+         *
+         * @return Zero in case of success, non-zero on error.
          */
-        void sst_received(wsrep::client_service &cs, int error,
+        int sst_received(wsrep::client_service &cs, int error,
                           bool *awaiting_callback = NULL);
 
         /**
@@ -660,7 +661,8 @@ namespace wsrep
         int desync(wsrep::unique_lock<wsrep::mutex>&);
         void resync(wsrep::unique_lock<wsrep::mutex>&);
         void state(wsrep::unique_lock<wsrep::mutex>&, enum state);
-        void wait_until_state(wsrep::unique_lock<wsrep::mutex>&, enum state) const;
+        void wait_until_state(wsrep::unique_lock<wsrep::mutex>&,
+                              enum state) const;
         // Interrupt all threads which are waiting for state
         void interrupt_state_waiters(wsrep::unique_lock<wsrep::mutex>&);
 
