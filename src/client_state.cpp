@@ -582,9 +582,13 @@ int wsrep::client_state::begin_nbo_phase_one(
 
     int ret;
     bool timed_out;
+
+    toi_meta_ = wsrep::ws_meta();
+    nbo_meta_ = wsrep::ws_meta();
+
     auto const status(poll_enter_toi(
                           lock, keys, buffer,
-                          toi_meta_,
+                          nbo_meta_,
                           wsrep::provider::flag::start_transaction,
                           wait_until,
                           timed_out));
@@ -618,7 +622,7 @@ int wsrep::client_state::end_nbo_phase_one(const wsrep::mutable_buffer& err)
     debug_log_state("end_nbo_phase_one: enter");
     assert(state_ == s_exec);
     assert(mode_ == m_nbo);
-    assert(in_toi());
+    assert(in_nbo());
 
     enum wsrep::provider::status status(provider().leave_toi(id_, err));
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
@@ -633,8 +637,6 @@ int wsrep::client_state::end_nbo_phase_one(const wsrep::mutable_buffer& err)
         ret = 1;
         break;
     }
-    nbo_meta_ = toi_meta_;
-    toi_meta_ = wsrep::ws_meta();
     toi_mode_ = m_undefined;
     debug_log_state("end_nbo_phase_one: leave");
     return ret;

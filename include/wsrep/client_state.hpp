@@ -754,6 +754,14 @@ namespace wsrep
         }
 
         /**
+         * Return true if the client_state is under NBO operation.
+         */
+        bool in_nbo() const
+        {
+            return (nbo_meta_.seqno().is_undefined() == false);
+        }
+
+        /**
          * Return the mode where client entered into TOI mode.
          * The return value can be either m_local or
          * m_high_priority.
