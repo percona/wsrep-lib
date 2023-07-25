@@ -721,7 +721,7 @@ int wsrep::client_state::end_nbo_phase_two(const wsrep::mutable_buffer& err)
     assert(state_ == s_exec);
     assert(mode_ == m_nbo);
     assert(toi_mode_ == m_local);
-    assert(in_toi());
+    assert(in_nbo());
     enum wsrep::provider::status status(
         provider().leave_toi(id_, err));
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
