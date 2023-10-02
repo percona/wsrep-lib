@@ -163,10 +163,7 @@ namespace wsrep
         /**
          * Destructor.
          */
-        virtual ~client_state()
-        {
-            assert(transaction_.active() == false);
-        }
+        virtual ~client_state();
 
         /** @name Client session handling */
         /** @{ */
@@ -298,11 +295,7 @@ namespace wsrep
          *
          * @param err Applying error (empty for no error)
          */
-        void after_applying()
-        {
-            assert(mode_ == m_high_priority);
-            transaction_.after_applying();
-        }
+        void after_applying();
 
         /** @name Replication interface */
         /** @{ */
@@ -313,12 +306,7 @@ namespace wsrep
          *       - Register the transaction on server level for bookkeeping
          *       - Isolation levels? Or part of the transaction?
          */
-        int start_transaction(const wsrep::transaction_id& id)
-        {
-            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            assert(state_ == s_exec);
-            return transaction_.start_transaction(id);
-        }
+        int start_transaction(const wsrep::transaction_id& id);
 
         /**
          * Establish read view ID of the transaction.
@@ -332,12 +320,7 @@ namespace wsrep
          *
          * @param gtid optional explicit GTID of the transaction read view.
          */
-        int assign_read_view(const wsrep::gtid* const gtid = NULL)
-        {
-            assert(mode_ == m_local);
-            assert(state_ == s_exec);
-            return transaction_.assign_read_view(gtid);
-        }
+        int assign_read_view(const wsrep::gtid* const gtid = NULL);
 
         /**
          * Append a key into transaction write set.
@@ -346,12 +329,7 @@ namespace wsrep
          *
          * @return Zero on success, non-zero on failure.
          */
-        int append_key(const wsrep::key& key)
-        {
-            assert(mode_ == m_local);
-            assert(state_ == s_exec);
-            return transaction_.append_key(key);
-        }
+        int append_key(const wsrep::key& key);
 
         /**
          * Append keys in key_array into transaction write set.
@@ -360,29 +338,12 @@ namespace wsrep
          *
          * @return Zero in case of success, non-zero on failure.
          */
-        int append_keys(const wsrep::key_array& keys)
-        {
-            assert(mode_ == m_local || mode_ == m_toi);
-            assert(state_ == s_exec);
-            for (auto i(keys.begin()); i != keys.end(); ++i)
-            {
-                if (transaction_.append_key(*i))
-                {
-                    return 1;
-                }
-            }
-            return 0;
-        }
+        int append_keys(const wsrep::key_array& keys);
 
         /**
          * Append data into transaction write set.
          */
-        int append_data(const wsrep::const_buffer& data)
-        {
-            assert(mode_ == m_local);
-            assert(state_ == s_exec);
-            return transaction_.append_data(data);
-        }
+        int append_data(const wsrep::const_buffer& data);
 
         /** @} */
 
@@ -391,13 +352,7 @@ namespace wsrep
         /**
          * This method should be called after every row operation.
          */
-        int after_row()
-        {
-            assert(mode_ == m_local);
-            assert(state_ == s_exec);
-            return (transaction_.streaming_context().fragment_size() ?
-                    transaction_.after_row() : 0);
-        }
+        int after_row();
 
         /**
          * Set streaming parameters.
@@ -431,12 +386,7 @@ namespace wsrep
          */
         void disable_streaming();
 
-        void fragment_applied(wsrep::seqno seqno)
-        {
-            assert(mode_ == m_high_priority);
-            transaction_.fragment_applied(seqno);
-        }
-
+        void fragment_applied(wsrep::seqno seqno);
         /**
          * Prepare write set meta data for ordering.
          * This method should be called before ordered commit or
@@ -451,90 +401,31 @@ namespace wsrep
          */
         int prepare_for_ordering(const wsrep::ws_handle& ws_handle,
                                  const wsrep::ws_meta& ws_meta,
-                                 bool is_commit)
-        {
-            assert(state_ == s_exec);
-            return transaction_.prepare_for_ordering(
-                ws_handle, ws_meta, is_commit);
-        }
+                                 bool is_commit);
         /** @} */
 
         /** @name Applying interface */
         /** @{ */
         int start_transaction(const wsrep::ws_handle& wsh,
-                              const wsrep::ws_meta& meta)
-        {
-            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            assert(owning_thread_id_ == wsrep::this_thread::get_id());
-            assert(mode_ == m_high_priority);
-            return transaction_.start_transaction(wsh, meta);
-        }
+                              const wsrep::ws_meta& meta);
 
-        int next_fragment(const wsrep::ws_meta& meta)
-        {
-            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            assert(mode_ == m_high_priority);
-            return transaction_.next_fragment(meta);
-        }
+        int next_fragment(const wsrep::ws_meta& meta);
 
         /** @name Commit ordering interface */
         /** @{ */
-        int before_prepare()
-        {
-            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            assert(owning_thread_id_ == wsrep::this_thread::get_id());
-            assert(state_ == s_exec);
-            return transaction_.before_prepare(lock);
-        }
+        int before_prepare();
 
-        int after_prepare()
-        {
-            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            assert(owning_thread_id_ == wsrep::this_thread::get_id());
-            assert(state_ == s_exec);
-            return transaction_.after_prepare(lock);
-        }
+        int after_prepare();
 
-        int before_commit()
-        {
-            assert(owning_thread_id_ == wsrep::this_thread::get_id());
-            assert(state_ == s_exec || mode_ == m_local);
-            return transaction_.before_commit();
-        }
+        int before_commit();
 
-        int ordered_commit()
-        {
-            assert(owning_thread_id_ == wsrep::this_thread::get_id());
-            assert(state_ == s_exec || mode_ == m_local);
-            return transaction_.ordered_commit();
-        }
+        int ordered_commit();
 
-        int after_commit()
-        {
-            assert(owning_thread_id_ == wsrep::this_thread::get_id());
-            assert(state_ == s_exec || mode_ == m_local);
-            return transaction_.after_commit();
-        }
+        int after_commit();
         /** @} */
-        int before_rollback()
-        {
-            assert(owning_thread_id_ == wsrep::this_thread::get_id());
-            assert(state_ == s_idle ||
-                   state_ == s_exec ||
-                   state_ == s_result ||
-                   state_ == s_quitting);
-            return transaction_.before_rollback();
-        }
+        int before_rollback();
 
-        int after_rollback()
-        {
-            assert(owning_thread_id_ == wsrep::this_thread::get_id());
-            assert(state_ == s_idle ||
-                   state_ == s_exec ||
-                   state_ == s_result ||
-                   state_ == s_quitting);
-            return transaction_.after_rollback();
-        }
+        int after_rollback();
 
         /**
          * This method should be called by the background rollbacker
@@ -629,12 +520,7 @@ namespace wsrep
          * After this call, a different client may later attempt to terminate
          * the transaction by calling method commit_by_xid() or rollback_by_xid().
          */
-        void xa_detach()
-        {
-            assert(mode_ == m_local);
-            assert(state_ == s_none || state_ == s_exec || state_ == s_quitting);
-            transaction_.xa_detach();
-        }
+        void xa_detach();
 
         /**
          * Replay a XA transaction
@@ -645,13 +531,7 @@ namespace wsrep
          * Since the victim is idle, this method can be called
          * by the BF aborter or the backround rollbacker.
          */
-        void xa_replay()
-        {
-            assert(mode_ == m_local);
-            assert(state_ == s_idle);
-            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            transaction_.xa_replay(lock);
-        }
+        void xa_replay();
 
         //
         // BF aborting
@@ -660,24 +540,27 @@ namespace wsrep
          * Brute force abort a transaction. This method should be
          * called by a transaction which needs to BF abort a conflicting
          * locally processing transaction.
+         *
+         * @param lock Lock to protect client state.
+         * @param bf_seqno Seqno of the BF aborter.
          */
-        int bf_abort(wsrep::seqno bf_seqno)
-        {
-            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            assert(mode_ == m_local || transaction_.is_streaming());
-            return transaction_.bf_abort(lock, bf_seqno);
-        }
+        int bf_abort(wsrep::unique_lock<wsrep::mutex>& lock, wsrep::seqno bf_seqno);
+        /**
+         * Wrapper to bf_abort() call, grabs lock internally.
+         */
+        int bf_abort(wsrep::seqno bf_seqno);
+
         /**
          * Brute force abort a transaction in total order. This method
          * should be called by the TOI operation which needs to
          * BF abort a transaction.
          */
-        int total_order_bf_abort(wsrep::seqno bf_seqno)
-        {
-            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-            assert(mode_ == m_local || transaction_.is_streaming());
-            return transaction_.total_order_bf_abort(lock, bf_seqno);
-        }
+        int total_order_bf_abort(wsrep::unique_lock<wsrep::mutex>& lock, wsrep::seqno bf_seqno);
+
+        /**
+         * Wrapper to total_order_bf_abort(), grabs lock internally.
+         */
+        int total_order_bf_abort(wsrep::seqno bf_seqno);
 
         /**
          * Adopt a streaming transaction state. This is must be
@@ -686,20 +569,12 @@ namespace wsrep
          * set up enough context for handling the rollback
          * fragment.
          */
-        void adopt_transaction(const wsrep::transaction& transaction)
-        {
-            assert(mode_ == m_high_priority);
-            transaction_.adopt(transaction);
-        }
+        void adopt_transaction(const wsrep::transaction& transaction);
 
         /**
          * Adopt (store) transaction applying error for further processing.
          */
-        void adopt_apply_error(wsrep::mutable_buffer& err)
-        {
-            assert(mode_ == m_high_priority);
-            transaction_.adopt_apply_error(err);
-        }
+        void adopt_apply_error(wsrep::mutable_buffer& err);
 
         /**
          * Clone enough state from another transaction so that replaing will
@@ -710,7 +585,6 @@ namespace wsrep
          */
         void clone_transaction_for_replay(const wsrep::transaction& transaction)
         {
-            // assert(mode_ == m_high_priority);
             transaction_.clone_for_replay(transaction);
         }
 
@@ -1049,6 +923,7 @@ namespace wsrep
         {
             return current_error_status_;
         }
+<<<<<<< HEAD
 
         /**
          * Mark transaction for force bf abort
@@ -1058,6 +933,18 @@ namespace wsrep
             transaction_.mark_force_bf_abort();
         }
 
+||||||| 940ba9b
+=======
+
+        /**
+         * Return true if rollbacker is active. The caller should
+         * hold the mutex protecting client_state.
+         */
+        bool is_rollbacker_active()
+        {
+            return rollbacker_active_;
+        }
+>>>>>>> codership/master
     protected:
         /**
          * Client context constuctor. This is protected so that it
@@ -1163,11 +1050,6 @@ namespace wsrep
         {
             rollbacker_active_ = value;
         }
-
-        bool is_rollbacker_active()
-        {
-            return rollbacker_active_;
-        }
     };
 
     static inline const char* to_c_string(
@@ -1216,19 +1098,8 @@ namespace wsrep
     class high_priority_context
     {
     public:
-        high_priority_context(wsrep::client_state& client)
-            : client_(client)
-            , orig_mode_(client.mode_)
-        {
-            wsrep::unique_lock<wsrep::mutex> lock(client.mutex_);
-            client.mode(lock, wsrep::client_state::m_high_priority);
-        }
-        virtual ~high_priority_context()
-        {
-            wsrep::unique_lock<wsrep::mutex> lock(client_.mutex_);
-            assert(client_.mode() == wsrep::client_state::m_high_priority);
-            client_.mode(lock, orig_mode_);
-        }
+        high_priority_context(wsrep::client_state& client);
+        virtual ~high_priority_context();
     private:
         wsrep::client_state& client_;
         enum wsrep::client_state::mode orig_mode_;

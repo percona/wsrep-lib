@@ -27,9 +27,14 @@
 #include "transaction_id.hpp"
 #include "compiler.hpp"
 
+<<<<<<< HEAD
 #include "wsrep_api.h"
 
 #include <cassert>
+||||||| 940ba9b
+#include <cassert>
+=======
+>>>>>>> codership/master
 #include <cstring>
 
 #include <string>

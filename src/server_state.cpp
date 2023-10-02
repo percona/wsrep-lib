@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2019 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2023 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -676,9 +676,7 @@ int wsrep::server_state::start_sst(const std::string& sst_request,
     {
         lock.lock();
         wsrep::log_warning() << "SST preparation failed";
-        // v26 API does not have JOINED event, so in anticipation of SYNCED
-        // we must do it here.
-        state(lock, s_joined);
+        return_from_donor_state(lock);
         ret = 1;
     }
     return ret;
@@ -692,9 +690,9 @@ void wsrep::server_state::sst_sent(const wsrep::gtid& gtid, int error)
         wsrep::log_info() << "SST sending failed: " << error;
 
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
-    // v26 API does not have JOINED event, so in anticipation of SYNCED
-    // we must do it here.
-    state(lock, s_joined);
+
+    return_from_donor_state(lock);
+
     lock.unlock();
     enum provider::status const retval(provider().sst_sent(gtid, error));
     if (retval != provider::success)
@@ -1145,6 +1143,13 @@ int wsrep::server_state::on_apply(
         return apply_write_set(*this, high_priority_service,
                                ws_handle, ws_meta, data);
     }
+}
+
+enum wsrep::server_state::state wsrep::server_state::state(
+    wsrep::unique_lock<wsrep::mutex>& lock WSREP_UNUSED) const
+{
+    assert(lock.owns_lock());
+    return state_;
 }
 
 void wsrep::server_state::start_streaming_client(
@@ -1648,4 +1653,17 @@ wsrep::server_state::send_pending_rollback_events()
 {
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     return send_pending_rollback_events(lock);
+}
+
+void wsrep::server_state::return_from_donor_state(
+    wsrep::unique_lock<wsrep::mutex>& lock)
+{
+    assert(lock.owns_lock());
+    // v26 API does not have JOINED event, so in anticipation of SYNCED
+    // we must do it here. Do not modify the state if donor lost the
+    // donor state e.g. due to cluster partitioning.
+    if (state(lock) == s_donor)
+    {
+        state(lock, s_joined);
+    }
 }
