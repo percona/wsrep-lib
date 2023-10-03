@@ -923,7 +923,6 @@ namespace wsrep
         {
             return current_error_status_;
         }
-<<<<<<< HEAD
 
         /**
          * Mark transaction for force bf abort
@@ -933,9 +932,6 @@ namespace wsrep
             transaction_.mark_force_bf_abort();
         }
 
-||||||| 940ba9b
-=======
-
         /**
          * Return true if rollbacker is active. The caller should
          * hold the mutex protecting client_state.
@@ -944,7 +940,6 @@ namespace wsrep
         {
             return rollbacker_active_;
         }
->>>>>>> codership/master
     protected:
         /**
          * Client context constuctor. This is protected so that it

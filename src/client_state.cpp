@@ -262,11 +262,15 @@ int wsrep::client_state::after_statement()
     debug_log_state("after_statement: enter");
     assert(state() == s_exec);
     assert(mode() == m_local);
-<<<<<<< HEAD
 
-    if ((transaction_.active() &&
-         transaction_.state() == wsrep::transaction::s_must_abort) ||
-        (transaction_.force_bf_rollback()))
+    // Handle BF Abort of the local ROLLBACK TO SAVEPOINT
+    // (PXC-2930) (commit 2d1e7abc)
+    //
+    // If local transaction executing rollback to savepoint is interrupted by a
+    // local running high priority transaction (DDL) then semantics should
+    // cause local transaction to completely abort (and not limit to rollback
+    // of savepoint only). This is set in ha_rollback_to_savepoint().
+    if (transaction_.force_bf_rollback())
     {
         lock.unlock();
         client_service_.bf_rollback();
@@ -280,32 +284,8 @@ int wsrep::client_state::after_statement()
             override_error(wsrep::e_deadlock_error);
         }
     }
-    lock.unlock();
 
-    (void)transaction_.after_statement();
-||||||| 940ba9b
-
-    if (transaction_.active() &&
-        transaction_.state() == wsrep::transaction::s_must_abort)
-    {
-        lock.unlock();
-        client_service_.bf_rollback();
-        lock.lock();
-        assert(transaction_.state() == wsrep::transaction::s_aborted);
-        // Error may be set already. For example, if fragment size
-        // exceeded the maximum size in certify_fragment(), then
-        // we already have wsrep::e_error_during_commit
-        if (current_error() == wsrep::e_success)
-        {
-            override_error(wsrep::e_deadlock_error);
-        }
-    }
-    lock.unlock();
-
-    (void)transaction_.after_statement();
-=======
-    (void)transaction_.after_statement(lock);
->>>>>>> codership/master
+    (void)transaction_.after_statement(lock); // lock is already acquired
     if (current_error() == wsrep::e_deadlock_error)
     {
         if (mode_ == m_local)

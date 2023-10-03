@@ -2106,15 +2106,7 @@ int wsrep::transaction::replay(wsrep::unique_lock<wsrep::mutex>& lock)
             wsrep::e_deadlock_error);
         if (is_streaming())
         {
-<<<<<<< HEAD
             client_service_.remove_fragments(lock);
-||||||| 940ba9b
-            client_service_.remove_fragments();
-=======
-            lock.unlock();
-            client_service_.remove_fragments();
-            lock.lock();
->>>>>>> codership/master
             streaming_context_.cleanup();
         }
         state(lock, s_aborted);
