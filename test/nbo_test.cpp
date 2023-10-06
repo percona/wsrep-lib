@@ -39,7 +39,7 @@ BOOST_FIXTURE_TEST_CASE(test_local_nbo,
                       wsrep::const_buffer(data.data(),
                                           data.size())) == 0);
     BOOST_REQUIRE(cc.mode() == wsrep::client_state::m_nbo);
-    BOOST_REQUIRE(cc.in_toi());
+    BOOST_REQUIRE(cc.in_nbo());
     BOOST_REQUIRE(cc.toi_mode() == wsrep::client_state::m_local);
     // After required resoureces have been grabbed, NBO leave should
     // end TOI but leave the client state in m_nbo.

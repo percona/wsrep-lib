@@ -299,7 +299,10 @@ namespace wsrep
         std::string vendor() const WSREP_OVERRIDE { return "mock"; }
         void* native() const WSREP_OVERRIDE { return 0; }
 
-        void fetch_pfs_info(wsrep_node_info_t *, uint32_t ) { return; }
+        void fetch_pfs_info(wsrep_node_info_t *, uint32_t ) WSREP_OVERRIDE { return; }
+        enum wsrep::provider::status rotate_gcache_key() WSREP_OVERRIDE {
+            return wsrep::provider::status::success;
+        }
 
         //
         // Methods to modify mock state

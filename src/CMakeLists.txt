@@ -2,7 +2,7 @@
 # Copyright (C) 2018 Codership Oy <info@codership.com>
 #
 
-add_library(wsrep-lib
+set(WSREP_LIB_SOURCE_FILES
   allowlist_service_v1.cpp
   client_state.cpp
   config_service_v1.cpp
@@ -28,4 +28,22 @@ add_library(wsrep-lib
   wsrep_provider_v26.cpp
   xid.cpp
   )
+
+add_library(wsrep-lib
+  ${WSREP_LIB_SOURCE_FILES}
+  )
+
 target_link_libraries(wsrep-lib wsrep_api_v26 pthread ${WSREP_LIB_LIBDL})
+
+if (WSREP_LIB_WITH_UNIT_TESTS OR WSREP_LIB_WITH_UNIT_TESTS_EXTRA)
+  add_library(wsrep-lib-unittest
+    ${WSREP_LIB_SOURCE_FILES}
+    )
+  target_compile_definitions(
+    wsrep-lib-unittest
+    PRIVATE
+    -DWSREP_LIB_WITH_UNIT_TESTS
+    )
+
+   target_link_libraries(wsrep-lib-unittest wsrep_api_v26 pthread ${WSREP_LIB_LIBDL})
+endif()
