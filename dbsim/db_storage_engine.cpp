@@ -20,6 +20,8 @@
 #include "db_storage_engine.hpp"
 #include "db_client.hpp"
 
+#include <cassert>
+
 void db::storage_engine::transaction::start(db::client* cc)
 {
     wsrep::unique_lock<wsrep::mutex> lock(se_.mutex_);
@@ -106,7 +108,6 @@ wsrep::view db::storage_engine::get_view() const
 
 void db::storage_engine::validate_position(const wsrep::gtid& gtid) const
 {
-    using std::rel_ops::operator<=;
     if (position_.id() == gtid.id() && gtid.seqno() <= position_.seqno())
     {
         std::ostringstream os;

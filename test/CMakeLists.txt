@@ -31,7 +31,7 @@ endif()
 
 add_executable(wsrep-lib_test ${TEST_SOURCES})
 
-target_link_libraries(wsrep-lib_test wsrep-lib)
+target_link_libraries(wsrep-lib_test wsrep-lib-unittest)
 
 add_test(NAME    wsrep-lib_test
          COMMAND wsrep-lib_test)

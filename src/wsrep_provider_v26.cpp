@@ -655,21 +655,33 @@ namespace
 
     void abort_cb(void)
     {
+#ifdef WSREP_LIB_WITH_UNIT_TESTS
+        return;
+#else
         wsrep_sst_cancel(false);
+#endif /* WSREP_LIB_WITH_UNIT_TESTS */
     }
 
 #ifdef HAVE_PSI_INTERFACE
-    static void pfs_instr_cb(wsrep_pfs_instr_type_t type, wsrep_pfs_instr_ops_t ops,
-                      wsrep_pfs_instr_tag_t tag,
-                      void **value __attribute__((unused)),
-                      void **alliedvalue __attribute__((unused)),
-                      const void *ts __attribute__((unused))) {
-      return wsrep_pfs_instr_cb(type, ops, tag, value, alliedvalue, ts);
+    static void pfs_instr_cb(wsrep_pfs_instr_type_t type [[maybe_unused]],
+                      wsrep_pfs_instr_ops_t ops [[maybe_unused]],
+                      wsrep_pfs_instr_tag_t tag [[maybe_unused]],
+                      void **value [[maybe_unused]],
+                      void **alliedvalue [[maybe_unused]],
+                      const void *ts [[maybe_unused]]) {
+#ifdef WSREP_LIB_WITH_UNIT_TESTS
+        return;
+#else
+        return wsrep_pfs_instr_cb(type, ops, tag, value, alliedvalue, ts);
+#endif /* WSREP_LIB_WITH_UNIT_TESTS */
     }
 #endif /* HAVE_PSI_INTERFACE */
 
-    static wsrep_cb_status enc_get_key_cb(const wsrep_buf_t* keyId,
-                                          wsrep_enc_key_t* key) {
+    static wsrep_cb_status enc_get_key_cb(const wsrep_buf_t* keyId [[maybe_unused]],
+                                          wsrep_enc_key_t* key [[maybe_unused]]) {
+#ifdef WSREP_LIB_WITH_UNIT_TESTS
+        return WSREP_CB_SUCCESS;
+#else
         std::string skeyId(static_cast<const char*>(keyId->ptr), keyId->len);
         std::string skey = wsrep_get_master_key(skeyId);
         if (skey.length() == 0 || skey.length() > key->len) {
@@ -678,12 +690,17 @@ namespace
         memcpy(const_cast<void*>(key->ptr), skey.c_str(), skey.length());
         key->len = skey.length();
         return WSREP_CB_SUCCESS;
+#endif /* WSREP_LIB_WITH_UNIT_TESTS */
     }
 
-    static wsrep_cb_status enc_new_key_cb(const wsrep_buf_t* keyId) {
+    static wsrep_cb_status enc_new_key_cb(const wsrep_buf_t* keyId [[maybe_unused]]) {
+#ifdef WSREP_LIB_WITH_UNIT_TESTS
+        return WSREP_CB_SUCCESS;
+#else
         std::string skeyId(static_cast<const char*>(keyId->ptr), keyId->len);
         bool res = wsrep_new_master_key(skeyId);
         return res ? WSREP_CB_FAILURE: WSREP_CB_SUCCESS;
+#endif /* WSREP_LIB_WITH_UNIT_TESTS */
     }
 
     static int init_allowlist_service(void* dlh,

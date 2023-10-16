@@ -29,7 +29,7 @@
 #include "buffer.hpp"
 #include "xid.hpp"
 
-#include <cassert>
+#include <iosfwd>
 #include <vector>
 
 namespace wsrep
@@ -197,6 +197,7 @@ namespace wsrep
         int before_statement();
 
         int after_statement();
+        int after_statement(wsrep::unique_lock<wsrep::mutex>&);
 
         void after_command_must_abort(wsrep::unique_lock<wsrep::mutex>&);
 
@@ -255,6 +256,8 @@ namespace wsrep
         int certify_commit(wsrep::unique_lock<wsrep::mutex>&);
         int append_sr_keys_for_commit();
         int release_commit_order(wsrep::unique_lock<wsrep::mutex>&);
+        void remove_fragments_in_storage_service_scope(
+            wsrep::unique_lock<wsrep::mutex>&);
         void streaming_rollback(wsrep::unique_lock<wsrep::mutex>&);
         int replay(wsrep::unique_lock<wsrep::mutex>&);
         void xa_replay_common(wsrep::unique_lock<wsrep::mutex>&);
@@ -286,6 +289,14 @@ namespace wsrep
         wsrep::mutable_buffer apply_error_buf_;
         wsrep::xid xid_;
         bool streaming_rollback_in_progress_;
+        /* This flag tells that the transaction has become immutable
+           against BF aborts. Ideally this would be deduced from transaction
+           state, i.e. s_ordered_commit or s_committed, but the current
+           version of wsrep-lib changes the transaction state to
+           s_ordered_commit too late. Fixing this appears to require
+           too many changes to application using the lib, so boolean flag
+           must do. */
+        bool is_bf_immutable_;
     };
 
     static inline const char* to_c_string(enum wsrep::transaction::state state)
@@ -312,6 +323,8 @@ namespace wsrep
     {
         return to_c_string(state);
     }
+
+    std::ostream& operator<<(std::ostream& os, enum wsrep::transaction::state);
 
 }
 

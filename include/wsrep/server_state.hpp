@@ -569,12 +569,7 @@ namespace wsrep
             return state(lock);
         }
 
-        enum state state(wsrep::unique_lock<wsrep::mutex>&
-                         lock WSREP_UNUSED) const
-        {
-            assert(lock.owns_lock());
-            return state_;
-        }
+        enum state state(wsrep::unique_lock<wsrep::mutex>& lock) const;
 
         /**
          * Get provider status variables.
@@ -694,6 +689,9 @@ namespace wsrep
         // rollback_event_queue_
         enum wsrep::provider::status send_pending_rollback_events(
           wsrep::unique_lock<wsrep::mutex>& lock);
+
+        // Handle returning from donor state.
+        void return_from_donor_state(wsrep::unique_lock<wsrep::mutex>& lock);
 
         wsrep::mutex& mutex_;
         wsrep::condition_variable& cond_;

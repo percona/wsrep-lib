@@ -29,7 +29,6 @@
 
 #include "wsrep_api.h"
 
-#include <cassert>
 #include <cstring>
 
 #include <string>

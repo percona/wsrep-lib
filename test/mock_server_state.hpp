@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2019 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2013 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -34,7 +34,7 @@ namespace wsrep
     class mock_server_service : public wsrep::server_service
     {
     public:
-        mock_server_service(wsrep::server_state& server_state)
+        mock_server_service(wsrep::server_state* server_state)
             : sync_point_enabled_()
             , sync_point_action_()
             , sst_before_init_()
@@ -44,18 +44,20 @@ namespace wsrep
             , logged_view_()
             , position_()
         { }
+        mock_server_service(const mock_server_service&) = delete;
+        mock_server_service& operator=(const mock_server_service&) = delete;
 
         wsrep::storage_service* storage_service(wsrep::client_service&)
             WSREP_OVERRIDE
         {
-            return new wsrep::mock_storage_service(server_state_,
+            return new wsrep::mock_storage_service(*server_state_,
                                                    wsrep::client_id(++last_client_id_));
         }
 
         wsrep::storage_service* storage_service(wsrep::high_priority_service&)
             WSREP_OVERRIDE
         {
-            return new wsrep::mock_storage_service(server_state_,
+            return new wsrep::mock_storage_service(*server_state_,
                                                    wsrep::client_id(++last_client_id_));
         }
 
@@ -70,11 +72,11 @@ namespace wsrep
             WSREP_OVERRIDE
         {
             wsrep::mock_client* cs(new wsrep::mock_client(
-                                       server_state_,
+                                       *server_state_,
                                        wsrep::client_id(++last_client_id_),
                                        wsrep::client_state::m_high_priority));
             wsrep::mock_high_priority_service* ret(
-                new wsrep::mock_high_priority_service(server_state_,
+                new wsrep::mock_high_priority_service(*server_state_,
                                                       cs, false));
             cs->open(cs->id());
             cs->before_command();
@@ -85,11 +87,11 @@ namespace wsrep
             wsrep::high_priority_service&) WSREP_OVERRIDE
         {
             wsrep::mock_client* cs(new wsrep::mock_client(
-                                       server_state_,
+                                       *server_state_,
                                        wsrep::client_id(++last_client_id_),
                                        wsrep::client_state::m_high_priority));
             wsrep::mock_high_priority_service* ret(
-                new wsrep::mock_high_priority_service(server_state_,
+                new wsrep::mock_high_priority_service(*server_state_,
                                                       cs, false));
             cs->open(cs->id());
             cs->before_command();
@@ -115,7 +117,7 @@ namespace wsrep
         void log_message(enum wsrep::log::level level, const char* message)
             WSREP_OVERRIDE
         {
-            wsrep::log(level, server_state_.name().c_str()) << message;
+            wsrep::log(level, server_state_->name().c_str()) << message;
         }
         void log_dummy_write_set(wsrep::client_state&,
                                  const wsrep::ws_meta&)
@@ -170,14 +172,25 @@ namespace wsrep
         bool sst_before_init() const WSREP_OVERRIDE
         { return sst_before_init_; }
         std::string sst_request() WSREP_OVERRIDE { return ""; }
-        int start_sst(const std::string&,
-                      const wsrep::gtid&,
-                      bool) WSREP_OVERRIDE { return 0; }
-        void background_rollback(wsrep::client_state& client_state)
-            WSREP_OVERRIDE
+
+        // Action to take when start_sst() method is called.
+        // This can be overriden by test case to inject custom
+        // behavior.
+        std::function<int()> start_sst_action{[](){ return 0; }};
+        int start_sst(const std::string&, const wsrep::gtid&,
+                      bool) WSREP_OVERRIDE
         {
+            return start_sst_action();
+        }
+
+        void
+        background_rollback(wsrep::unique_lock<wsrep::mutex>& lock,
+                            wsrep::client_state& client_state) WSREP_OVERRIDE
+        {
+            lock.unlock();
             client_state.before_rollback();
             client_state.after_rollback();
+            lock.lock();
         }
 
         int wait_committing_transactions(int) WSREP_OVERRIDE { return 0; }
@@ -196,7 +209,7 @@ namespace wsrep
                 case spa_none:
                     break;
                 case spa_initialize:
-                    server_state_.initialized();
+                    server_state_->initialized();
                     break;
                 case spa_initialize_error:
                     throw wsrep::runtime_error("Inject initialization error");
@@ -224,7 +237,7 @@ namespace wsrep
             position_ = position;
         }
     private:
-        wsrep::server_state& server_state_;
+        wsrep::server_state* server_state_;
         unsigned long long last_client_id_;
         unsigned long long last_transaction_id_;
         wsrep::view logged_view_;
