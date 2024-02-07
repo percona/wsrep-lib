@@ -235,6 +235,11 @@ namespace wsrep
          */
         virtual void debug_crash(const char* crash_point) = 0;
 
+        /**
+         * Checks if the related thread holds any MDL locks.
+        */
+        virtual bool has_mdl_locks() { return false; }
+
     protected:
         wsrep::server_state& server_state_;
         bool must_exit_;
