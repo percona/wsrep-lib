@@ -853,7 +853,7 @@ wsrep::server_state::wait_for_gtid(const wsrep::gtid& gtid, int timeout)
     return provider().wait_for_gtid(gtid, timeout);
 }
 
-int 
+int
 wsrep::server_state::set_encryption_key(std::vector<unsigned char>& key)
 {
     encryption_key_ = key;
@@ -1127,22 +1127,26 @@ int wsrep::server_state::on_apply(
     const wsrep::ws_meta& ws_meta,
     const wsrep::const_buffer& data)
 {
+    int res = -1;
+    assert(!high_priority_service.has_mdl_locks());
     if (is_toi(ws_meta.flags()))
     {
-        return apply_toi(provider(), high_priority_service,
+        res = apply_toi(provider(), high_priority_service,
                          ws_handle, ws_meta, data);
     }
     else if (is_commutative(ws_meta.flags()) || is_native(ws_meta.flags()))
     {
         // Not implemented yet.
         assert(0);
-        return 0;
+        res = 0;
     }
     else
     {
-        return apply_write_set(*this, high_priority_service,
+        res = apply_write_set(*this, high_priority_service,
                                ws_handle, ws_meta, data);
     }
+    assert(!high_priority_service.has_mdl_locks());
+    return res;
 }
 
 enum wsrep::server_state::state wsrep::server_state::state(
@@ -1408,7 +1412,7 @@ void wsrep::server_state::wait_until_state(
         cond_.wait(lock);
         // If the waiter waits for any other state than disconnecting
         // or disconnected and the state has been changed to disconnecting,
-        // this usually means that some error was encountered 
+        // this usually means that some error was encountered
         if (state != s_disconnecting && state != s_disconnected
             && state_ == s_disconnecting)
         {
