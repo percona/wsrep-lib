@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2025 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -31,6 +31,7 @@
 
 #include <cstring>
 
+#include <memory>
 #include <string>
 #include <vector>
 #include <ostream>
@@ -49,7 +50,8 @@ namespace wsrep
     class tls_service;
     class allowlist_service;
     class event_service;
-
+    class client_service;
+    class connection_monitor_service;
     class stid
     {
     public:
@@ -285,7 +287,6 @@ namespace wsrep
             static const int streaming = (1 << 15);
             static const int snapshot = (1 << 16);
             static const int nbo = (1 << 17);
-
             /** decipher capability bitmask */
             static std::string str(int);
         };
@@ -334,10 +335,37 @@ namespace wsrep
         virtual int append_key(wsrep::ws_handle&, const wsrep::key&) = 0;
         virtual enum status append_data(
             wsrep::ws_handle&, const wsrep::const_buffer&) = 0;
+
+        /**
+         * Callback for application defined sequential consistency.
+         * The provider will call
+         * the callback once it can guarantee sequential consistency. */
+        typedef struct seq_cb {
+            /** Opaque caller context */
+            void *ctx;
+            /** Function to be called by the provider when sequential
+             * consistency is guaranteed. */
+            void (*fn)(void *ctx);
+        } seq_cb_t;
+
+        /**
+         * Certify the write set. 
+         *
+         * @param client_id[in] Id of the client session.
+         * @param ws_handle[in,out] Write set handle associated to the current
+         *                 transaction.
+         * @param flags[in] Flags associated to the write set (see struct flag).
+         * @param ws_meta[out] Write set meta data associated to the
+         *                     replicated write set.
+         * @param seq_cb[in] Optional callback for application defined
+         *                   sequential consistency.
+         *
+         * @return Status code defined in struct status.
+         */
         virtual enum status
-        certify(wsrep::client_id, wsrep::ws_handle&,
-                int,
-                wsrep::ws_meta&) = 0;
+        certify(wsrep::client_id client_id, wsrep::ws_handle& ws_handle,
+                int flags, wsrep::ws_meta& ws_meta, const seq_cb_t* seq_cb)
+            = 0;
         /**
          * BF abort a transaction inside provider.
          *
@@ -350,6 +378,7 @@ namespace wsrep
          */
         virtual enum status bf_abort(wsrep::seqno bf_seqno,
                                      wsrep::transaction_id victim_trx,
+                                     wsrep::client_service& victim_ctx,
                                      wsrep::seqno& victim_seqno) = 0;
         virtual enum status rollback(wsrep::transaction_id) = 0;
         virtual enum status commit_order_enter(const wsrep::ws_handle&,
@@ -382,6 +411,7 @@ namespace wsrep
          * Leave total order isolation critical section
          */
         virtual enum status leave_toi(wsrep::client_id,
+                                      const wsrep::ws_meta& ws_meta,
                                       const wsrep::mutable_buffer& err) = 0;
 
         /**
@@ -462,6 +492,7 @@ namespace wsrep
             wsrep::tls_service* tls_service;
             wsrep::allowlist_service* allowlist_service;
             wsrep::event_service* event_service;
+            wsrep::connection_monitor_service* connection_monitor_service;
 
             // some GCC and clang versions don't support C++11 default
             // initializers fully, so we need to use explicit constructors
@@ -473,17 +504,20 @@ namespace wsrep
                 , tls_service()
                 , allowlist_service()
                 , event_service()
+                , connection_monitor_service()
             {
             }
 
             services(wsrep::thread_service* thr,
                      wsrep::tls_service*    tls,
                      wsrep::allowlist_service* all,
-                     wsrep::event_service*  event)
+                     wsrep::event_service*  event,
+                     wsrep::connection_monitor_service* con)
                 : thread_service(thr)
                 , tls_service(tls)
                 , allowlist_service(all)
                 , event_service(event)
+                , connection_monitor_service(con)
             {
             }
         };
@@ -494,11 +528,12 @@ namespace wsrep
          * @param provider_options Initial options to provider
          * @param thread_service Optional thread service implementation.
          */
-        static provider* make_provider(wsrep::server_state&,
-                                       const std::string& provider_spec,
-                                       const std::string& provider_options,
-                                       const wsrep::provider::services& services
-                                       = wsrep::provider::services());
+        static std::unique_ptr<provider> make_provider(
+            wsrep::server_state&,
+            const std::string& provider_spec,
+            const std::string& provider_options,
+            const wsrep::provider::services& services
+            = wsrep::provider::services());
 
     protected:
         wsrep::server_state& server_state_;

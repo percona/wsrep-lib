@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2019 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2025 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -388,12 +388,12 @@ int wsrep::client_state::next_fragment(const wsrep::ws_meta& meta)
     return transaction_.next_fragment(meta);
 }
 
-int wsrep::client_state::before_prepare()
+int wsrep::client_state::before_prepare(const wsrep::provider::seq_cb_t* seq_cb)
 {
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     assert(owning_thread_id_ == wsrep::this_thread::get_id());
     assert(state_ == s_exec);
-    return transaction_.before_prepare(lock);
+    return transaction_.before_prepare(lock, seq_cb);
 }
 
 int wsrep::client_state::after_prepare()
@@ -404,11 +404,11 @@ int wsrep::client_state::after_prepare()
     return transaction_.after_prepare(lock);
 }
 
-int wsrep::client_state::before_commit()
+int wsrep::client_state::before_commit(const wsrep::provider::seq_cb_t* seq_cb)
 {
     assert(owning_thread_id_ == wsrep::this_thread::get_id());
     assert(state_ == s_exec || mode_ == m_local);
-    return transaction_.before_commit();
+    return transaction_.before_commit(seq_cb);
 }
 
 int wsrep::client_state::ordered_commit()
@@ -534,7 +534,7 @@ int wsrep::client_state::bf_abort(wsrep::unique_lock<wsrep::mutex>& lock,
 {
     assert(lock.owns_lock());
     assert(mode_ == m_local || transaction_.is_streaming());
-    auto ret = transaction_.bf_abort(lock, bf_seqno);
+    auto ret = transaction_.bf_abort(lock, bf_seqno, client_service_);
     assert(lock.owns_lock());
     return ret;
 }
@@ -550,7 +550,7 @@ int wsrep::client_state::total_order_bf_abort(
 {
     assert(lock.owns_lock());
     assert(mode_ == m_local || transaction_.is_streaming());
-    auto ret = transaction_.total_order_bf_abort(lock, bf_seqno);
+    auto ret = transaction_.total_order_bf_abort(lock, bf_seqno, client_service_);
     assert(lock.owns_lock());
     return ret;
 }
@@ -608,7 +608,7 @@ wsrep::client_state::poll_enter_toi(
             // Successfully entered TOI, but the provider reported failure.
             // This may happen for example if certification fails.
             // Leave TOI before proceeding.
-            if (provider().leave_toi(id_, wsrep::mutable_buffer()))
+            if (provider().leave_toi(id_, poll_meta, wsrep::mutable_buffer()))
             {
                 wsrep::log_warning()
                     << "Failed to leave TOI after failure in "
@@ -712,10 +712,12 @@ int wsrep::client_state::leave_toi_local(const wsrep::mutable_buffer& err)
 {
     debug_log_state("leave_toi_local: enter");
     assert(toi_mode_ == m_local);
-    leave_toi_common();
 
+    auto ret = (provider().leave_toi(id_, toi_meta_, err) == provider::success ? 0 : 1);
+    leave_toi_common();
     debug_log_state("leave_toi_local: leave");
-    return (provider().leave_toi(id_, err) == provider::success ? 0 : 1);
+
+    return ret;
 }
 
 void wsrep::client_state::leave_toi_mode()
@@ -836,7 +838,7 @@ int wsrep::client_state::end_nbo_phase_one(const wsrep::mutable_buffer& err)
     assert(mode_ == m_nbo);
     assert(in_nbo());
 
-    enum wsrep::provider::status status(provider().leave_toi(id_, err));
+    enum wsrep::provider::status status(provider().leave_toi(id_, toi_meta_, err));
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     int ret;
     switch (status)
@@ -935,7 +937,7 @@ int wsrep::client_state::end_nbo_phase_two(const wsrep::mutable_buffer& err)
     assert(toi_mode_ == m_local);
     assert(in_nbo());
     enum wsrep::provider::status status(
-        provider().leave_toi(id_, err));
+        provider().leave_toi(id_, toi_meta_, err));
     wsrep::unique_lock<wsrep::mutex> lock(mutex_);
     int ret;
     switch (status)
@@ -1070,6 +1072,7 @@ void wsrep::client_state::state(
     }
     state_hist_.push_back(state_);
     state_ = state;
+    client_service_.notify_state_change();
     if (state_hist_.size() > 10)
     {
         state_hist_.erase(state_hist_.begin());
@@ -1099,6 +1102,7 @@ void wsrep::client_state::mode(
         assert(0);
     }
     mode_ = mode;
+    client_service_.notify_state_change();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

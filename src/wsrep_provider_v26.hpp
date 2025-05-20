@@ -60,10 +60,11 @@ namespace wsrep
         enum wsrep::provider::status
         certify(wsrep::client_id, wsrep::ws_handle&,
                 int,
-                wsrep::ws_meta&) WSREP_OVERRIDE;
+                wsrep::ws_meta&, const seq_cb_t*) WSREP_OVERRIDE;
         enum wsrep::provider::status
         bf_abort(wsrep::seqno,
                  wsrep::transaction_id,
+                 wsrep::client_service&,
                  wsrep::seqno&) WSREP_OVERRIDE;
         enum wsrep::provider::status
         rollback(const wsrep::transaction_id) WSREP_OVERRIDE;
@@ -84,6 +85,7 @@ namespace wsrep
                                                int)
             WSREP_OVERRIDE;
         enum wsrep::provider::status leave_toi(wsrep::client_id,
+                                               const wsrep::ws_meta& ws_meta,
                                                const wsrep::mutable_buffer&)
             WSREP_OVERRIDE;
         std::pair<wsrep::gtid, enum wsrep::provider::status>

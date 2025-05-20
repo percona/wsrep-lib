@@ -6,6 +6,7 @@ set(WSREP_LIB_SOURCE_FILES
   allowlist_service_v1.cpp
   client_state.cpp
   config_service_v1.cpp
+  connection_monitor_service_v1.cpp
   event_service_v1.cpp
   exception.cpp
   gtid.cpp

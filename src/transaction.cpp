@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2025 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -63,8 +63,10 @@ namespace
             {
                 throw wsrep::runtime_error("Null client_state provided");
             }
-            client_service_.reset_globals();
-            storage_service_->store_globals();
+            if (storage_service_->requires_globals()) {
+              client_service_.reset_globals();
+              storage_service_->store_globals();
+            }
         }
 
         wsrep::storage_service& storage_service()
@@ -74,8 +76,11 @@ namespace
 
         ~scoped_storage_service()
         {
+            bool restore_globals = storage_service_->requires_globals();
             deleter_(storage_service_);
-            client_service_.store_globals();
+            if (restore_globals) {
+              client_service_.store_globals();
+            }
         }
     private:
         scoped_storage_service(const scoped_storage_service&);
@@ -134,6 +139,7 @@ int wsrep::transaction::start_transaction(
     state_hist_.clear();
     ws_handle_ = wsrep::ws_handle(id);
     flags(wsrep::provider::flag::start_transaction);
+    client_service_.notify_state_change();
     switch (client_state_.mode())
     {
     case wsrep::client_state::m_high_priority:
@@ -163,6 +169,7 @@ int wsrep::transaction::start_transaction(
         id_ = ws_meta.transaction_id();
         assert(client_state_.mode() == wsrep::client_state::m_high_priority);
         state_ = s_executing;
+        client_service_.notify_state_change();
         state_hist_.clear();
         ws_handle_ = ws_handle;
         ws_meta_ = ws_meta;
@@ -276,8 +283,8 @@ int wsrep::transaction::after_row()
     return ret;
 }
 
-int wsrep::transaction::before_prepare(
-    wsrep::unique_lock<wsrep::mutex>& lock)
+int wsrep::transaction::before_prepare(wsrep::unique_lock<wsrep::mutex>& lock,
+                                       const wsrep::provider::seq_cb_t* seq_cb)
 {
     assert(lock.owns_lock());
     int ret(0);
@@ -317,6 +324,12 @@ int wsrep::transaction::before_prepare(
                 lock.unlock();
                 if (ret)
                 {
+                    lock.lock();
+                    if (state() == s_executing)
+                    {
+                        state(lock, s_must_abort);
+                    }
+                    lock.unlock();
                     client_state_.override_error(wsrep::e_deadlock_error);
                 }
             }
@@ -348,7 +361,7 @@ int wsrep::transaction::before_prepare(
             }
             else
             {
-                ret = certify_commit(lock);
+                ret = certify_commit(lock, seq_cb);
             }
 
             assert((ret == 0 && state() == s_preparing) ||
@@ -444,7 +457,7 @@ int wsrep::transaction::after_prepare(
     return ret;
 }
 
-int wsrep::transaction::before_commit()
+int wsrep::transaction::before_commit(const wsrep::provider::seq_cb* seq_cb)
 {
     int ret(1);
 
@@ -464,7 +477,7 @@ int wsrep::transaction::before_commit()
     case wsrep::client_state::m_local:
         if (state() == s_executing)
         {
-            ret = before_prepare(lock) || after_prepare(lock);
+            ret = before_prepare(lock, seq_cb) || after_prepare(lock);
             assert((ret == 0 &&
                     (state() == s_committing || state() == s_prepared))
                    ||
@@ -494,7 +507,7 @@ int wsrep::transaction::before_commit()
 
         if (ret == 0 && state() == s_prepared)
         {
-            ret = certify_commit(lock);
+            ret = certify_commit(lock, nullptr);
             assert((ret == 0 && state() == s_committing) ||
                    (state() == s_must_abort ||
                     state() == s_must_replay ||
@@ -542,7 +555,7 @@ int wsrep::transaction::before_commit()
         }
         else if (state() == s_executing || state() == s_replaying)
         {
-            ret = before_prepare(lock) || after_prepare(lock);
+            ret = before_prepare(lock, nullptr) || after_prepare(lock);
         }
         else
         {
@@ -1003,7 +1016,8 @@ void wsrep::transaction::after_applying()
 
 bool wsrep::transaction::bf_abort(
     wsrep::unique_lock<wsrep::mutex>& lock,
-    wsrep::seqno bf_seqno)
+    wsrep::seqno bf_seqno,
+    wsrep::client_service& victim_ctx)
 {
     bool ret(false);
     const enum wsrep::transaction::state state_at_enter(state());
@@ -1034,7 +1048,7 @@ bool wsrep::transaction::bf_abort(
             wsrep::seqno victim_seqno;
             enum wsrep::provider::status
                 status(client_state_.provider().bf_abort(
-                           bf_seqno, id_, victim_seqno));
+                           bf_seqno, id_, victim_ctx, victim_seqno));
             switch (status)
             {
             case wsrep::provider::success:
@@ -1124,14 +1138,15 @@ bool wsrep::transaction::bf_abort(
 
 bool wsrep::transaction::total_order_bf_abort(
     wsrep::unique_lock<wsrep::mutex>& lock WSREP_UNUSED,
-    wsrep::seqno bf_seqno)
+    wsrep::seqno bf_seqno,
+    wsrep::client_service& victim_ctx)
 {
     /* We must set this flag before entering bf_abort() in order
      * to streaming_rollback() work correctly. The flag will be
      * unset if BF abort was not allowed. Note that we rely in
      * bf_abort() not to release lock if the BF abort is not allowed. */
     bf_aborted_in_total_order_ = true;
-    bool ret(bf_abort(lock, bf_seqno));
+    bool ret(bf_abort(lock, bf_seqno, victim_ctx));
     if (not ret)
     {
         bf_aborted_in_total_order_ = false;
@@ -1149,6 +1164,7 @@ void wsrep::transaction::clone_for_replay(const wsrep::transaction& other)
     ws_meta_ = other.ws_meta_;
     streaming_context_ = other.streaming_context_;
     state_ = s_replaying;
+    client_service_.notify_state_change();
 }
 
 void wsrep::transaction::assign_xid(const wsrep::xid& xid)
@@ -1211,7 +1227,7 @@ int wsrep::transaction::commit_or_rollback_by_xid(const wsrep::xid& xid,
         provider().certify(client_state_.id(),
                            ws_handle_,
                            flags(),
-                           meta));
+                           meta, nullptr));
 
     int ret;
     if (cert_ret == wsrep::provider::success)
@@ -1392,6 +1408,7 @@ void wsrep::transaction::state(
         state_hist_.erase(state_hist_.begin());
     }
     state_ = next_state;
+    client_service_.notify_state_change();
 
     if (state_ == s_must_replay)
     {
@@ -1638,7 +1655,7 @@ int wsrep::transaction::certify_fragment(
             cert_ret = provider().certify(client_state_.id(),
                                           ws_handle_,
                                           flags(),
-                                          sr_ws_meta);
+                                          sr_ws_meta, nullptr);
             client_service_.debug_crash(
                 "crash_replicate_fragment_after_certify");
 
@@ -1773,7 +1790,7 @@ int wsrep::transaction::certify_fragment(
 }
 
 int wsrep::transaction::certify_commit(
-    wsrep::unique_lock<wsrep::mutex>& lock)
+    wsrep::unique_lock<wsrep::mutex>& lock, const provider::seq_cb_t* seq_cb)
 {
     assert(lock.owns_lock());
     assert(active());
@@ -1857,7 +1874,7 @@ int wsrep::transaction::certify_commit(
         cert_ret(provider().certify(client_state_.id(),
                                    ws_handle_,
                                    flags(),
-                                   ws_meta_));
+                                   ws_meta_, seq_cb));
     client_service_.debug_sync("wsrep_after_certification");
 
     lock.lock();
