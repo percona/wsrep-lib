@@ -413,11 +413,49 @@ namespace wsrep
 
         /** @name Commit ordering interface */
         /** @{ */
-        int before_prepare();
+
+        /**
+         * This method should be called before the transaction
+         * is prepared. This call certifies the transaction and
+         * assigns write set meta data.
+         *
+         * @param seq_cb Callback which is passed to underlying
+         *               certify() call. See wsrep::provider::certify().
+         *
+         * @return Zero on success, non-zero on failure.
+         */
+        int before_prepare(const wsrep::provider::seq_cb_t* seq_cb);
+
+        /** Same as before_prepare() above, but nullptr is passed
+         * to seq_cb. */
+        int before_prepare()
+        {
+            return before_prepare(nullptr);
+        }
 
         int after_prepare();
 
-        int before_commit();
+        /**
+         * This method should be called before transaction is committed.
+         * This call makes the transaction to enter commit time
+         * critical section. The critical section is left by calling
+         * ordered_commit().
+         *
+         * If before_prepare() is not called before this call, the
+         * before_prepare() is called internally.
+         *
+         * @param seq_cb Callback which is passed to underlying
+         *               before_prepare() call.
+         *
+         * @return Zero on success, non-zero on failure.
+         */
+        int before_commit(const wsrep::provider::seq_cb_t* seq_cb);
+
+        /** Same as before_commit(), but nullptr is passed to seq_cb. */
+        int before_commit()
+        {
+            return before_commit(nullptr);
+        }
 
         int ordered_commit();
 
@@ -544,7 +582,8 @@ namespace wsrep
          * @param lock Lock to protect client state.
          * @param bf_seqno Seqno of the BF aborter.
          */
-        int bf_abort(wsrep::unique_lock<wsrep::mutex>& lock, wsrep::seqno bf_seqno);
+        int bf_abort(wsrep::unique_lock<wsrep::mutex>& lock,
+                     wsrep::seqno bf_seqno);
         /**
          * Wrapper to bf_abort() call, grabs lock internally.
          */
@@ -555,7 +594,8 @@ namespace wsrep
          * should be called by the TOI operation which needs to
          * BF abort a transaction.
          */
-        int total_order_bf_abort(wsrep::unique_lock<wsrep::mutex>& lock, wsrep::seqno bf_seqno);
+        int total_order_bf_abort(wsrep::unique_lock<wsrep::mutex>& lock,
+                                 wsrep::seqno bf_seqno);
 
         /**
          * Wrapper to total_order_bf_abort(), grabs lock internally.

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2025 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -69,6 +69,7 @@ namespace wsrep
             , bf_abort_during_wait_()
             , bf_abort_during_fragment_removal_()
             , error_during_prepare_data_()
+            , error_during_fragment_removal_(false)
             , killed_before_certify_()
             , sync_point_enabled_()
             , sync_point_action_()
@@ -99,10 +100,13 @@ namespace wsrep
                 client_state_->after_rollback();
                 return 1;
             }
-            else
+
+            if (error_during_fragment_removal_)
             {
-                return 0;
+                return 1;
             }
+
+            return 0;
         }
 
         void will_replay() WSREP_OVERRIDE { will_replay_called_ = true; }
@@ -207,6 +211,10 @@ namespace wsrep
             // Not going to do this while unit testing
         }
 
+        void notify_state_change() WSREP_OVERRIDE
+        {
+            // Not going to do this while unit testing
+        }
 
         //
         // Knobs to tune the behavior
@@ -218,6 +226,7 @@ namespace wsrep
         bool bf_abort_during_wait_;
         bool bf_abort_during_fragment_removal_;
         bool error_during_prepare_data_;
+        bool error_during_fragment_removal_;
         bool killed_before_certify_;
         std::string sync_point_enabled_;
         enum sync_point_action
