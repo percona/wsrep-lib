@@ -259,23 +259,6 @@ namespace wsrep
                                   rollback_mode)
             , mutex_()
             , cond_()
-<<<<<<< HEAD
-            , provider_()
-        {
-            set_provider_factory([&](wsrep::server_state&,
-                                     const std::string&,
-                                     const std::string&,
-                                     const wsrep::provider::services&)
-            {
-                // The provider object is destroyed upon server state
-                // destruction, so using a raw pointer is safe.
-                provider_ = new wsrep::mock_provider(*this);
-                return std::unique_ptr<wsrep::provider>(provider_);
-            });
-||||||| 31db847
-            , provider_(*this)
-        { }
-=======
             , provider_()
         {
             set_provider_factory(
@@ -289,7 +272,6 @@ namespace wsrep
                     provider_ = new wsrep::mock_provider(*this);
                     return std::unique_ptr<wsrep::provider>(provider_);
                 });
->>>>>>> codership/master
 
             const int ret WSREP_UNUSED = load_provider("mock", "");
             assert(ret == 0);

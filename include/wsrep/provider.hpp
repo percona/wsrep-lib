@@ -31,13 +31,8 @@
 
 #include <cstring>
 
-<<<<<<< HEAD
-#include <memory>
-||||||| 31db847
-=======
 #include <functional>
 #include <memory>
->>>>>>> codership/master
 #include <string>
 #include <vector>
 #include <ostream>
@@ -56,16 +51,9 @@ namespace wsrep
     class tls_service;
     class allowlist_service;
     class event_service;
-<<<<<<< HEAD
-    class client_service;
-    class connection_monitor_service;
-||||||| 31db847
-
-=======
     class client_service;
     class connection_monitor_service;
     class provider_options;
->>>>>>> codership/master
     class stid
     {
     public:
@@ -363,7 +351,7 @@ namespace wsrep
         } seq_cb_t;
 
         /**
-         * Certify the write set. 
+         * Certify the write set.
          *
          * @param client_id[in] Id of the client session.
          * @param ws_handle[in,out] Write set handle associated to the current
@@ -487,7 +475,14 @@ namespace wsrep
         virtual void* native() const = 0;
 
         /**
-<<<<<<< HEAD
+         * Get conflicting gtid for the given transaction handle, if any.
+         */
+        virtual wsrep::gtid conflict_gtid(const wsrep::ws_handle&) const
+        {
+            return wsrep::gtid::undefined();
+        }
+
+        /**
          * Fetch cluster node information to populate PXC cluster view table.
          */
         virtual void fetch_pfs_info(wsrep_node_info_t *nodes, uint32_t size) = 0;
@@ -498,17 +493,6 @@ namespace wsrep
         virtual enum wsrep::provider::status rotate_gcache_key() = 0;
 
         /**
-||||||| 31db847
-=======
-         * Get conflicting gtid for the given transaction handle, if any.
-         */
-        virtual wsrep::gtid conflict_gtid(const wsrep::ws_handle&) const
-        {
-            return wsrep::gtid::undefined();
-        }
-
-        /**
->>>>>>> codership/master
          * Services argument passed to make_provider. This struct contains
          * optional services which are passed to the provider.
          */
@@ -554,27 +538,12 @@ namespace wsrep
          * @param provider_options_cb Callback to get initial provider options
          * @param thread_service Optional thread service implementation.
          */
-<<<<<<< HEAD
-        static std::unique_ptr<provider> make_provider(
-            wsrep::server_state&,
-            const std::string& provider_spec,
-            const std::string& provider_options,
-            const wsrep::provider::services& services
-            = wsrep::provider::services());
-||||||| 31db847
-        static provider* make_provider(wsrep::server_state&,
-                                       const std::string& provider_spec,
-                                       const std::string& provider_options,
-                                       const wsrep::provider::services& services
-                                       = wsrep::provider::services());
-=======
         static std::unique_ptr<provider> make_provider(
             wsrep::server_state&, const std::string& provider_spec,
             const std::function<int(const provider_options&, std::string&)>&
                 provider_options_cb,
             const wsrep::provider::services& services
             = wsrep::provider::services());
->>>>>>> codership/master
 
     protected:
         wsrep::server_state& server_state_;

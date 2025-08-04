@@ -27,37 +27,17 @@
 #include <cassert>
 #include <memory>
 
-<<<<<<< HEAD
-std::unique_ptr<wsrep::provider> wsrep::provider::make_provider(
-    wsrep::server_state& server_state,
-    const std::string& provider_spec,
-    const std::string& provider_options,
-||||||| 31db847
-wsrep::provider* wsrep::provider::make_provider(
-    wsrep::server_state& server_state,
-    const std::string& provider_spec,
-    const std::string& provider_options,
-=======
 std::unique_ptr<wsrep::provider> wsrep::provider::make_provider(
     wsrep::server_state& server_state, const std::string& provider_spec,
     const std::function<int(const provider_options&, std::string&)>&
         provider_options_cb,
->>>>>>> codership/master
     const wsrep::provider::services& services)
 {
     try
     {
-<<<<<<< HEAD
-        return std::unique_ptr<wsrep::provider>(new wsrep::wsrep_provider_v26(
-            server_state, provider_options, provider_spec, services));
-||||||| 31db847
-        return new wsrep::wsrep_provider_v26(
-            server_state, provider_options, provider_spec, services);
-=======
         return std::unique_ptr<wsrep::provider>(new wsrep::wsrep_provider_v26(
             server_state, provider_spec, provider_options_cb,
             services));
->>>>>>> codership/master
     }
     catch (const wsrep::runtime_error& e)
     {

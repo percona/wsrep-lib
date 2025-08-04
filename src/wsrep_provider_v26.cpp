@@ -28,13 +28,8 @@
 #include "wsrep/thread_service.hpp"
 #include "wsrep/tls_service.hpp"
 #include "wsrep/allowlist_service.hpp"
-<<<<<<< HEAD
-#include "wsrep/connection_monitor_service.hpp"
-||||||| 31db847
-=======
 #include "wsrep/connection_monitor_service.hpp"
 #include "wsrep/provider_options.hpp"
->>>>>>> codership/master
 
 #include "service_helpers.hpp"
 #include "thread_service_v1.hpp"
@@ -845,81 +840,10 @@ void wsrep::wsrep_provider_v26::deinit_services()
 }
 
 wsrep::wsrep_provider_v26::wsrep_provider_v26(
-<<<<<<< HEAD
-    wsrep::server_state &server_state, const std::string &provider_options,
-    const std::string &provider_spec,
-||||||| 31db847
-    wsrep::server_state& server_state,
-    const std::string& provider_options,
-    const std::string& provider_spec,
-=======
     wsrep::server_state& server_state,
     const std::string& provider_spec,
     const std::function<int(provider_options&, std::string&)>& provider_options_cb,
->>>>>>> codership/master
     const wsrep::provider::services& services)
-<<<<<<< HEAD
-    : provider(server_state), wsrep_(), services_enabled_() {
-  wsrep_gtid_t state_id;
-  bool encryption_enabled =
-      server_state.encryption_service() &&
-      server_state.encryption_service()->encryption_enabled();
-  std::memcpy(state_id.uuid.data, server_state.initial_position().id().data(),
-              sizeof(state_id.uuid.data));
-  state_id.seqno = server_state.initial_position().seqno().get();
-  struct wsrep_init_args init_args;
-  memset(&init_args, 0, sizeof(init_args));
-  init_args.app_ctx = &server_state;
-  init_args.node_name = server_state_.name().c_str();
-  init_args.node_address = server_state_.address().c_str();
-  init_args.node_incoming = server_state_.incoming_address().c_str();
-  init_args.data_dir = server_state_.working_dir().c_str();
-  init_args.options = provider_options.c_str();
-  init_args.proto_ver = server_state.max_protocol_version();
-  init_args.state_id = &state_id;
-  init_args.state = 0;
-  init_args.logger_cb = &logger_cb;
-  init_args.connected_cb = &connected_cb;
-  init_args.view_cb = &view_cb;
-  init_args.sst_request_cb = &sst_request_cb;
-  init_args.encrypt_cb = encryption_enabled ? encrypt_cb : NULL;
-  init_args.apply_cb = &apply_cb;
-  init_args.unordered_cb = 0;
-  init_args.sst_donate_cb = &sst_donate_cb;
-  init_args.synced_cb = &synced_cb;
-||||||| 31db847
-    : provider(server_state)
-    , wsrep_()
-    , services_enabled_()
-{
-    wsrep_gtid_t state_id;
-    bool encryption_enabled = server_state.encryption_service() &&
-                              server_state.encryption_service()->encryption_enabled();
-    std::memcpy(state_id.uuid.data,
-                server_state.initial_position().id().data(),
-                sizeof(state_id.uuid.data));
-    state_id.seqno = server_state.initial_position().seqno().get();
-    struct wsrep_init_args init_args;
-    memset(&init_args, 0, sizeof(init_args));
-    init_args.app_ctx = &server_state;
-    init_args.node_name = server_state_.name().c_str();
-    init_args.node_address = server_state_.address().c_str();
-    init_args.node_incoming = server_state_.incoming_address().c_str();
-    init_args.data_dir = server_state_.working_dir().c_str();
-    init_args.options = provider_options.c_str();
-    init_args.proto_ver = server_state.max_protocol_version();
-    init_args.state_id = &state_id;
-    init_args.state = 0;
-    init_args.logger_cb = &logger_cb;
-    init_args.connected_cb = &connected_cb;
-    init_args.view_cb = &view_cb;
-    init_args.sst_request_cb = &sst_request_cb;
-    init_args.encrypt_cb = encryption_enabled ? encrypt_cb : NULL;
-    init_args.apply_cb = &apply_cb;
-    init_args.unordered_cb = 0;
-    init_args.sst_donate_cb = &sst_donate_cb;
-    init_args.synced_cb = &synced_cb;
-=======
     : provider(server_state)
     , wsrep_()
     , services_enabled_()
@@ -958,65 +882,15 @@ wsrep::wsrep_provider_v26::wsrep_provider_v26(
     init_args.unordered_cb = 0;
     init_args.sst_donate_cb = &sst_donate_cb;
     init_args.synced_cb = &synced_cb;
->>>>>>> codership/master
 
-<<<<<<< HEAD
-  init_args.abort_cb = abort_cb;
-  init_args.pfs_instr_cb = NULL;
+    init_args.abort_cb = abort_cb;
+    init_args.pfs_instr_cb = NULL;
 #ifdef HAVE_PSI_INTERFACE
-  init_args.pfs_instr_cb = pfs_instr_cb;
+    init_args.pfs_instr_cb = pfs_instr_cb;
 #endif /* HAVE_PSI_INTERFACE */
-  init_args.enc_get_key_cb = enc_get_key_cb;
-  init_args.enc_new_key_cb = enc_new_key_cb;
+    init_args.enc_get_key_cb = enc_get_key_cb;
+    init_args.enc_new_key_cb = enc_new_key_cb;
 
-  if (wsrep_load(provider_spec.c_str(), &wsrep_, &logger_cb)) {
-    throw wsrep::runtime_error("Failed to load wsrep library");
-  }
-
-  init_services(services);
-
-  if (wsrep_->init(wsrep_, &init_args) != WSREP_OK) {
-    throw wsrep::runtime_error("Failed to initialize wsrep provider");
-  }
-
-  if (encryption_enabled) {
-    const std::vector<unsigned char> &key = server_state.get_encryption_key();
-    if (key.size()) {
-      wsrep::const_buffer const_key(key.data(), key.size());
-      enum status const retval(enc_set_key(const_key));
-      if (retval != success) {
-        std::string msg("Failed to set encryption key: ");
-        msg += to_string(retval);
-        throw wsrep::runtime_error(msg);
-      }
-||||||| 31db847
-    if (wsrep_load(provider_spec.c_str(), &wsrep_, logger_cb))
-    {
-        throw wsrep::runtime_error("Failed to load wsrep library");
-    }
-
-    init_services(services);
-
-    if (wsrep_->init(wsrep_, &init_args) != WSREP_OK)
-    {
-        throw wsrep::runtime_error("Failed to initialize wsrep provider");
-    }
-
-    if (encryption_enabled)
-    {
-        const std::vector<unsigned char>& key = server_state.get_encryption_key();
-        if (key.size())
-        {
-            wsrep::const_buffer const_key(key.data(), key.size());
-            enum status const retval(enc_set_key(const_key));
-            if (retval != success)
-            {
-                std::string msg("Failed to set encryption key: ");
-                msg += to_string(retval);
-                throw wsrep::runtime_error(msg);
-            }
-        }
-=======
     provider_options options;
     config_service_v2_fetch(wsrep_, &options);
 
@@ -1046,9 +920,7 @@ wsrep::wsrep_provider_v26::wsrep_provider_v26(
                 throw wsrep::runtime_error(msg);
             }
         }
->>>>>>> codership/master
     }
-  }
 }
 
 wsrep::wsrep_provider_v26::~wsrep_provider_v26()

@@ -303,20 +303,6 @@ namespace wsrep
             const wsrep::provider::services& services
             = wsrep::provider::services());
 
-<<<<<<< HEAD
-        using provider_factory_func =
-            std::function<decltype(wsrep::provider::make_provider)>;
-
-        /**
-         * Set provider factory method.
-         *
-         * @param Factory method to create a provider.
-         */
-        void set_provider_factory(const provider_factory_func&);
-
-        /** Unload/unset provider. */
-||||||| 31db847
-=======
         /**
          * Load WSRep provider.
          *
@@ -355,7 +341,6 @@ namespace wsrep
         void set_provider_factory(const provider_factory_func&);
 
         /** Unload/unset provider. */
->>>>>>> codership/master
         void unload_provider();
 
         bool is_provider_loaded() const { return provider_ != 0; }
@@ -450,9 +435,9 @@ namespace wsrep
 
         /**
          * Set encryption key
-         * 
+         *
          * @param key Encryption key
-         * 
+         *
          * @return Zero on success, non-zero on failure.
          */
         int set_encryption_key(std::vector<unsigned char>& key);
@@ -585,7 +570,6 @@ namespace wsrep
             return init_initialized_;
         }
 
-<<<<<<< HEAD
         /** Recover streaming appliers if not already recoverd yet.
          *
          * This method recovers streaming appliers from streaming log.
@@ -612,22 +596,6 @@ namespace wsrep
             return init_initialized_;
         }
 
-||||||| 31db847
-=======
-        /** Recover streaming appliers if not already recoverd yet.
-         *
-         * This method recovers streaming appliers from streaming log.
-         * It must be called before starting to apply events after
-         * connecting to the cluster.
-         *
-         * @param lock Lock object holding server_state mutex.
-         * @param service Either client or high priority service.
-         */
-        template <class C>
-        void recover_streaming_appliers_if_not_recovered(
-            wsrep::unique_lock<wsrep::mutex>& lock, C& service);
-
->>>>>>> codership/master
         /**
          * This method will be called by the provider when
          * a remote write set is being applied. It is the responsibility
@@ -666,8 +634,8 @@ namespace wsrep
          * - 0 - No debug logging.
          * - 1..n - Debug logging with increasing verbosity.
          */
-        void debug_log_level(int level) 
-        { 
+        void debug_log_level(int level)
+        {
             wsrep::log::debug_log_level(level);
         }
 
