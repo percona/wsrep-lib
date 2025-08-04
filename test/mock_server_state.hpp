@@ -22,6 +22,7 @@
 
 #include "wsrep/server_state.hpp"
 #include "wsrep/server_service.hpp"
+#include "wsrep/provider_options.hpp"
 #include "mock_client_state.hpp"
 #include "mock_high_priority_service.hpp"
 #include "mock_storage_service.hpp"
@@ -258,6 +259,7 @@ namespace wsrep
                                   rollback_mode)
             , mutex_()
             , cond_()
+<<<<<<< HEAD
             , provider_()
         {
             set_provider_factory([&](wsrep::server_state&,
@@ -270,6 +272,24 @@ namespace wsrep
                 provider_ = new wsrep::mock_provider(*this);
                 return std::unique_ptr<wsrep::provider>(provider_);
             });
+||||||| 31db847
+            , provider_(*this)
+        { }
+=======
+            , provider_()
+        {
+            set_provider_factory(
+                [&](wsrep::server_state&, const std::string&,
+                    const std::function<int(const wsrep::provider_options&,
+                                            std::string&)>&,
+                    const wsrep::provider::services&)
+                {
+                    // The provider object is destroyed upon server state
+                    // destruction, so using a raw pointer is safe.
+                    provider_ = new wsrep::mock_provider(*this);
+                    return std::unique_ptr<wsrep::provider>(provider_);
+                });
+>>>>>>> codership/master
 
             const int ret WSREP_UNUSED = load_provider("mock", "");
             assert(ret == 0);

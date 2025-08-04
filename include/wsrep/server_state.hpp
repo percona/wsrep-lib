@@ -117,6 +117,7 @@ namespace wsrep
     class server_service;
     class client_service;
     class encryption_service;
+    class provider_options;
 
     /** @class Server Context
      *
@@ -287,17 +288,61 @@ namespace wsrep
          * Load WSRep provider.
          *
          * @param provider WSRep provider library to be loaded.
-         * @param provider_options Provider specific options string
-         *        to be passed for provider during initialization.
+         * @param provider_options_cb Callback to get provider options.
+         *                            The function to be called must be
+         *                            idempotent.
          * @param services Application defined services passed to
          *                 the provider.
          *
          * @return Zero on success, non-zero on error.
          */
+        int load_provider(
+            const std::string& provider,
+            const std::function<int(const provider_options&, std::string&)>&
+                provider_options_cb,
+            const wsrep::provider::services& services
+            = wsrep::provider::services());
+
+<<<<<<< HEAD
+        using provider_factory_func =
+            std::function<decltype(wsrep::provider::make_provider)>;
+
+        /**
+         * Set provider factory method.
+         *
+         * @param Factory method to create a provider.
+         */
+        void set_provider_factory(const provider_factory_func&);
+
+        /** Unload/unset provider. */
+||||||| 31db847
+=======
+        /**
+         * Load WSRep provider.
+         *
+         * @param provider WSRep provider library to be loaded.
+         * @param options Provider specific options string
+         *        to be passed for provider during initialization.
+         * @param services Application defined services passed to
+         *                 the provider.
+         *
+         * @return Zero on success, non-zero on error.
+         *
+         * @note Provided for backward compatibility.
+         */
         int load_provider(const std::string& provider,
-                          const std::string& provider_options,
+                          const std::string& options,
                           const wsrep::provider::services& services
-                          = wsrep::provider::services());
+                          = wsrep::provider::services())
+        {
+            return load_provider(
+                provider,
+                [options](const provider_options&, std::string& option_string) {
+                  option_string.append(options);
+                  return 0;
+                },
+                services);
+        }
 
         using provider_factory_func =
             std::function<decltype(wsrep::provider::make_provider)>;
@@ -310,6 +355,7 @@ namespace wsrep
         void set_provider_factory(const provider_factory_func&);
 
         /** Unload/unset provider. */
+>>>>>>> codership/master
         void unload_provider();
 
         bool is_provider_loaded() const { return provider_ != 0; }
@@ -539,6 +585,7 @@ namespace wsrep
             return init_initialized_;
         }
 
+<<<<<<< HEAD
         /** Recover streaming appliers if not already recoverd yet.
          *
          * This method recovers streaming appliers from streaming log.
@@ -565,6 +612,22 @@ namespace wsrep
             return init_initialized_;
         }
 
+||||||| 31db847
+=======
+        /** Recover streaming appliers if not already recoverd yet.
+         *
+         * This method recovers streaming appliers from streaming log.
+         * It must be called before starting to apply events after
+         * connecting to the cluster.
+         *
+         * @param lock Lock object holding server_state mutex.
+         * @param service Either client or high priority service.
+         */
+        template <class C>
+        void recover_streaming_appliers_if_not_recovered(
+            wsrep::unique_lock<wsrep::mutex>& lock, C& service);
+
+>>>>>>> codership/master
         /**
          * This method will be called by the provider when
          * a remote write set is being applied. It is the responsibility
