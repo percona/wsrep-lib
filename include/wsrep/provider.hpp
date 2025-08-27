@@ -31,6 +31,7 @@
 
 #include <cstring>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -52,6 +53,7 @@ namespace wsrep
     class event_service;
     class client_service;
     class connection_monitor_service;
+    class provider_options;
     class stid
     {
     public:
@@ -349,7 +351,7 @@ namespace wsrep
         } seq_cb_t;
 
         /**
-         * Certify the write set. 
+         * Certify the write set.
          *
          * @param client_id[in] Id of the client session.
          * @param ws_handle[in,out] Write set handle associated to the current
@@ -473,6 +475,14 @@ namespace wsrep
         virtual void* native() const = 0;
 
         /**
+         * Get conflicting gtid for the given transaction handle, if any.
+         */
+        virtual wsrep::gtid conflict_gtid(const wsrep::ws_handle&) const
+        {
+            return wsrep::gtid::undefined();
+        }
+
+        /**
          * Fetch cluster node information to populate PXC cluster view table.
          */
         virtual void fetch_pfs_info(wsrep_node_info_t *nodes, uint32_t size) = 0;
@@ -525,13 +535,13 @@ namespace wsrep
          * Create a new provider.
          *
          * @param provider_spec Provider specification
-         * @param provider_options Initial options to provider
+         * @param provider_options_cb Callback to get initial provider options
          * @param thread_service Optional thread service implementation.
          */
         static std::unique_ptr<provider> make_provider(
-            wsrep::server_state&,
-            const std::string& provider_spec,
-            const std::string& provider_options,
+            wsrep::server_state&, const std::string& provider_spec,
+            const std::function<int(const provider_options&, std::string&)>&
+                provider_options_cb,
             const wsrep::provider::services& services
             = wsrep::provider::services());
 
