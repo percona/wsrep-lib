@@ -641,6 +641,10 @@ namespace wsrep
 
         wsrep::mutex& mutex() { return mutex_; }
 
+        void disable_node_reset() {
+            disable_node_reset_ = true;
+        }
+
     protected:
         /** Server state constructor
          *
@@ -698,6 +702,7 @@ namespace wsrep
             , previous_primary_view_()
             , current_view_()
             , rollback_event_queue_()
+            , disable_node_reset_()
         { }
 
     private:
@@ -780,6 +785,7 @@ namespace wsrep
         wsrep::view previous_primary_view_;
         wsrep::view current_view_;
         std::deque<wsrep::transaction_id> rollback_event_queue_;
+        bool disable_node_reset_;
     };
 
     static inline const char* to_c_string(
