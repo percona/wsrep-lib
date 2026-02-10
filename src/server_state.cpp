@@ -31,6 +31,8 @@
 #include <cassert>
 #include <sstream>
 #include <algorithm>
+#include <chrono> // std::chrono*
+#include <thread> // std::this_thread::sleep_for
 
 //////////////////////////////////////////////////////////////////////////////
 //                               Helpers                                    //
@@ -634,6 +636,82 @@ wsrep::seqno wsrep::server_state::desync_and_pause()
     }
     wsrep::log_info() << "Provider paused at: " << ret;
     return ret;
+}
+
+/*
+  In try_desync_and_pause function instead of calling
+  server_state::pause/try_pause we have merged 2 functions into one and added
+  pause pre-check first followed by desynch and actual try_pause.
+  So desync_and_pause and try_desync_and_pause functions are same just that
+  in try_desync_and_pause we call try_pause instead of pause and
+  handle the case when try_pause returns state where the pausing would block.
+  In that case we roll back the desync(refer pause, resume and
+  resume_and_resync function) and return undefined seqno to indicate failure.
+  If try_pause is successful then we return the pause seqno as before.
+*/
+wsrep::seqno wsrep::server_state::try_desync_and_pause()
+{
+    wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+    if (!pause_seqno_.is_undefined())
+    {
+        wsrep::log_info() << "Provider already paused at: " << pause_seqno_;
+        return pause_seqno_;
+    }
+
+    if (state(lock) != s_synced)
+    {
+        wsrep::log_info() << "Cannot pause: server not in synced state";
+        return wsrep::seqno::undefined();
+    }
+
+    while (pause_count_ > 0)
+    {
+        cond_.wait(lock);
+        if (!pause_seqno_.is_undefined()) {
+            wsrep::log_info() << "Provider already paused at: " << pause_seqno_;
+            return pause_seqno_;
+        }
+    }
+
+    wsrep::seqno result = provider().try_desync_and_pause();
+    if (result.is_undefined())
+    {
+        return wsrep::seqno::undefined();
+    }
+    ++desync_count_;
+    ++pause_count_;
+    pause_seqno_ = result;
+
+    return result;
+}
+
+wsrep::seqno wsrep::server_state::try_desync_and_pause(unsigned long timeout_ms)
+{
+    if (timeout_ms == 0)
+    {
+        return try_desync_and_pause();
+    }
+    auto const time_till_wait = std::chrono::steady_clock::now()
+                                + std::chrono::milliseconds(timeout_ms);
+    wsrep::seqno ret;
+    while (true)
+    {
+        ret = try_desync_and_pause();
+        if (!ret.is_undefined())
+        {
+            return ret;
+        }
+        /* Time has expired, undefined seqno would mean failure so return
+           undefined. */
+        if (std::chrono::steady_clock::now() >= time_till_wait)
+        {
+            wsrep::log_info() << "try_desync_and_pause timed out after "
+                              << timeout_ms << " ms";
+            return wsrep::seqno::undefined();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return wsrep::seqno::undefined();
 }
 
 void wsrep::server_state::resume_and_resync()

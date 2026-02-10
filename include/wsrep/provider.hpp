@@ -321,6 +321,7 @@ namespace wsrep
 
         virtual int capabilities() const = 0;
         virtual int desync() = 0;
+        virtual wsrep::seqno try_desync_and_pause() = 0;
         virtual int resync() = 0;
 
         virtual wsrep::seqno pause() = 0;
