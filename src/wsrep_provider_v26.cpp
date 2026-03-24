@@ -975,6 +975,11 @@ wsrep::seqno wsrep::wsrep_provider_v26::pause()
     return wsrep::seqno(wsrep_->pause(wsrep_));
 }
 
+wsrep::seqno wsrep::wsrep_provider_v26::try_desync_and_pause()
+{
+    return wsrep::seqno(wsrep_->try_desync_and_pause(wsrep_));
+}
+
 int wsrep::wsrep_provider_v26::resume()
 {
     return (wsrep_->resume(wsrep_) != WSREP_OK);

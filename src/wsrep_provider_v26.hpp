@@ -46,6 +46,7 @@ namespace wsrep
         int capabilities() const WSREP_OVERRIDE;
 
         int desync() WSREP_OVERRIDE;
+        wsrep::seqno try_desync_and_pause() WSREP_OVERRIDE;
         int resync() WSREP_OVERRIDE;
         wsrep::seqno pause() WSREP_OVERRIDE;
         int resume() WSREP_OVERRIDE;

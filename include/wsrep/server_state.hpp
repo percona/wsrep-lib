@@ -500,6 +500,32 @@ namespace wsrep
         wsrep::seqno desync_and_pause();
 
         /**
+         * Try to desync and pause the provider without blocking.
+         *
+         * This call relies on provider-level try_desync_and_pause() which
+         * should return immediately with a negative value if pausing would
+         * block. On such condition this method returns undefined seqno.
+         *
+         * @return Pause seqno on success,
+         *         undefined seqno if pausing would block or fails.
+         */
+        wsrep::seqno try_desync_and_pause();
+
+        /**
+         * Wrapper of actual try_desync_and_pause with timeout.
+         * try_desync_and_pause with timeout calls try_desync_and_pause()
+         * every 100ms until success or timeout_ms elapses.
+         * When timeout_ms is 0 this method simply calls
+         * try_desync_and_pause() without waiting.
+         *
+         * @param timeout_ms  Maximum time to wait in milliseconds; 0 = try
+         *                    once.
+         * @return Pause seqno on success, undefined seqno if pausing would
+         *         block or fails.(simpl)
+         */
+        wsrep::seqno try_desync_and_pause(unsigned long timeout_ms);
+
+        /**
          * Resume and resync the provider on one go. Prior this
          * call the provider must have been both desynced and paused,
          * by either desync_and_pause() or separate calls to desync()
