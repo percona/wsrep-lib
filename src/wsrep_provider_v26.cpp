@@ -29,14 +29,12 @@
 #include "wsrep/tls_service.hpp"
 #include "wsrep/allowlist_service.hpp"
 #include "wsrep/connection_monitor_service.hpp"
-#include "wsrep/provider_options.hpp"
 
 #include "service_helpers.hpp"
 #include "thread_service_v1.hpp"
 #include "tls_service_v1.hpp"
 #include "allowlist_service_v1.hpp"
 #include "event_service_v1.hpp"
-#include "config_service_v1.hpp"
 #include "v26/wsrep_api.h"
 #include "v26/wsrep_node_isolation.h"
 #include "connection_monitor_service_v1.hpp"
@@ -841,8 +839,8 @@ void wsrep::wsrep_provider_v26::deinit_services()
 
 wsrep::wsrep_provider_v26::wsrep_provider_v26(
     wsrep::server_state& server_state,
+    const std::string& provider_options,
     const std::string& provider_spec,
-    const std::function<int(provider_options&, std::string&)>& provider_options_cb,
     const wsrep::provider::services& services)
     : provider(server_state)
     , wsrep_()
@@ -855,14 +853,6 @@ wsrep::wsrep_provider_v26::wsrep_provider_v26(
                 server_state.initial_position().id().data(),
                 sizeof(state_id.uuid.data));
     state_id.seqno = server_state.initial_position().seqno().get();
-
-    if (wsrep_load(provider_spec.c_str(), &wsrep_, logger_cb))
-    {
-        throw wsrep::runtime_error("Failed to load wsrep library");
-    }
-
-    init_services(services);
-
     struct wsrep_init_args init_args;
     memset(&init_args, 0, sizeof(init_args));
     init_args.app_ctx = &server_state;
@@ -870,6 +860,7 @@ wsrep::wsrep_provider_v26::wsrep_provider_v26(
     init_args.node_address = server_state_.address().c_str();
     init_args.node_incoming = server_state_.incoming_address().c_str();
     init_args.data_dir = server_state_.working_dir().c_str();
+    init_args.options = provider_options.c_str();
     init_args.proto_ver = server_state.max_protocol_version();
     init_args.state_id = &state_id;
     init_args.state = 0;
@@ -891,15 +882,12 @@ wsrep::wsrep_provider_v26::wsrep_provider_v26(
     init_args.enc_get_key_cb = enc_get_key_cb;
     init_args.enc_new_key_cb = enc_new_key_cb;
 
-    provider_options options;
-    config_service_v2_fetch(wsrep_, &options);
-
-    std::string provider_options;
-    if (provider_options_cb(options, provider_options))
+    if (wsrep_load(provider_spec.c_str(), &wsrep_, logger_cb))
     {
-        throw wsrep::runtime_error("Failed to initialize wsrep provider options");
+        throw wsrep::runtime_error("Failed to load wsrep library");
     }
-    init_args.options = provider_options.c_str();
+
+    init_services(services);
 
     if (wsrep_->init(wsrep_, &init_args) != WSREP_OK)
     {

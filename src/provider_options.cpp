@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Codership Oy <info@codership.com>
+ * Copyright (C) 2021,2025 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -18,7 +18,6 @@
  */
 
 #include "wsrep/provider_options.hpp"
-#include "wsrep/provider.hpp"
 #include "config_service_v1.hpp"
 #include "wsrep/logger.hpp"
 
@@ -26,6 +25,7 @@
 #include <cassert>
 #include <cctype>
 #include <cstring>
+#include <cstdint> // int64_t'
 
 /**
  * Provider options string separators.
@@ -93,16 +93,16 @@ void wsrep::provider_options::option::update_value(
 
 wsrep::provider_options::option::~option() {}
 
-wsrep::provider_options::provider_options()
-    : options_()
+wsrep::provider_options::provider_options(wsrep::provider& provider)
+    : provider_(provider)
+    , options_()
 {
 }
 
-enum wsrep::provider::status
-wsrep::provider_options::initial_options(wsrep::provider& provider)
+enum wsrep::provider::status wsrep::provider_options::initial_options()
 {
     options_.clear();
-    if (config_service_v1_fetch(provider, this))
+    if (config_service_v1_fetch(provider_, this))
     {
         return wsrep::provider::error_not_implemented;
     }
@@ -124,7 +124,7 @@ wsrep::provider_options::get_option(const std::string& name) const
 }
 
 enum wsrep::provider::status wsrep::provider_options::set(
-    wsrep::provider& provider, const std::string& name,
+    const std::string& name,
     std::unique_ptr<wsrep::provider_options::option_value> value)
 {
     auto option(options_.find(name));
@@ -133,7 +133,7 @@ enum wsrep::provider::status wsrep::provider_options::set(
         return not_found_error;
     }
     provider_options_sep sep;
-    auto ret(provider.options(std::string(option->second->real_name())
+    auto ret(provider_.options(std::string(option->second->real_name())
                                + sep.key_value + value->as_string()
                                + sep.param));
     if (ret == provider::success)
@@ -161,10 +161,9 @@ enum wsrep::provider::status wsrep::provider_options::set_default(
     return wsrep::provider::success;
 }
 
-void wsrep::provider_options::for_each(
-    const std::function<void(option*)>& fn) const
+void wsrep::provider_options::for_each(const std::function<void(option*)>& fn)
 {
-    std::for_each(options_.begin(), options_.end(),
-                  [&fn](const options_map::value_type& opt)
-                  { fn(opt.second.get()); });
+    std::for_each(
+        options_.begin(), options_.end(),
+        [&fn](const options_map::value_type& opt) { fn(opt.second.get()); });
 }
