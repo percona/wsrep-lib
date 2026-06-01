@@ -31,7 +31,6 @@
 
 #include <cstring>
 
-#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -53,7 +52,6 @@ namespace wsrep
     class event_service;
     class client_service;
     class connection_monitor_service;
-    class provider_options;
     class stid
     {
     public:
@@ -536,13 +534,13 @@ namespace wsrep
          * Create a new provider.
          *
          * @param provider_spec Provider specification
-         * @param provider_options_cb Callback to get initial provider options
+         * @param provider_options Initial options to provider
          * @param thread_service Optional thread service implementation.
          */
         static std::unique_ptr<provider> make_provider(
-            wsrep::server_state&, const std::string& provider_spec,
-            const std::function<int(const provider_options&, std::string&)>&
-                provider_options_cb,
+            wsrep::server_state&,
+            const std::string& provider_spec,
+            const std::string& provider_options,
             const wsrep::provider::services& services
             = wsrep::provider::services());
 
