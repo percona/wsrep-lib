@@ -1198,9 +1198,22 @@ int wsrep::transaction::commit_or_rollback_by_xid(const wsrep::xid& xid,
                                                   bool commit)
 {
     debug_log_state("commit_or_rollback_by_xid enter");
-    wsrep::unique_lock<wsrep::mutex> lock(client_state_.mutex_);
     wsrep::server_state& server_state(client_state_.server_state());
+
+    /* Look up the streaming applier which owns the xid before locking the
+       client state. find_streaming_applier() grabs the server state mutex,
+       and the server state mutex must always be acquired before the client
+       state mutex, never the other way around. The server state is locked
+       first for example in convert_streaming_client_to_applier(), which
+       calls into high_priority_service::adopt_transaction(),
+       after_apply(), store_globals() and
+       server_service::release_high_priority_service(), all of which take
+       the client state mutex of the applier client. Taking the two mutexes
+       in the opposite order here would deadlock against those. */
     wsrep::high_priority_service* sa(server_state.find_streaming_applier(xid));
+
+    wsrep::unique_lock<wsrep::mutex> lock(client_state_.mutex_);
+    client_service_.debug_sync("wsrep_commit_or_rollback_by_xid_client_locked");
 
     if (!sa)
     {
